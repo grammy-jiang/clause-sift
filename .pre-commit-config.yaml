@@ -1,0 +1,26 @@
+minimum_pre_commit_version: "4.6.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.22.1
+    hooks:
+      - id: markdownlint-cli2
+        files: '\.(md|markdown)$'
+
+  - repo: local
+    hooks:
+      - id: mermaid-check
+        name: Validate Mermaid diagrams
+        entry: python scripts/check_mermaid.py
+        language: python
+        files: '\.(md|markdown)$'
