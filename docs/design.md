@@ -458,7 +458,7 @@ The builder must test:
 
 Comparison mode is mandatory for every `critical` document and optional for a `standard` document. A critical document must be parsed independently by two configured adapters backed by distinct parser implementations; running one implementation twice or changing only its options does not satisfy this rule. Neither adapter's output becomes canonical until the comparison gate passes.
 
-For a critical document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds its configured threshold. The static review report must show both outputs and every disagreement. A blocked document may proceed only after correcting the parser, source, or manifest and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
+For a critical document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds its configured threshold. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which is outside canonical and downstream artifact caches and remains available after failure. A blocked document may proceed only after correcting the parser, source, or manifest and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
 
 The versioned parser-routing configuration must name an ordered `canonical_primary` and `independent_comparator` for every critical document, either directly or through a deterministic rule over manifested fields. Both adapter identities, versions, configurations, and assigned roles are build inputs. After both single-parser gates and the comparison gate pass, the builder selects the `canonical_primary` parser-neutral artifact byte-for-byte as the sole input to deterministic canonical-model construction; the comparator is validation-only. Below-threshold wording or OCR differences therefore resolve to the primary output, never to field-by-field merging, majority selection, or build-order choice. Changing either role invalidates the parse and all downstream cache entries and requires a complete rebuild and review. With unchanged source bytes, ordered roles, adapters, and configurations, both the selected parser artifact and resulting canonical model must be byte-identical across rebuilds.
 
@@ -1163,7 +1163,7 @@ The intended build sequence is:
 4. Detect added, changed, and removed documents.
 5. Select parser routes.
 6. Produce parser-neutral artifacts for every selected route.
-7. Run each adapter's parsing validation and every required dual-parser comparison gate; only after all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents deterministically from it.
+7. Run each adapter's parsing validation and every required dual-parser comparison, finalize the Section 11.3 parser-validation report for both pass and failure paths, and then evaluate the blocking gate; only after the report is durable and all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents deterministically from it.
 8. Construct clause and node trees.
 9. Build node-level page and bounding-box mappings and validate their page counts against the source.
 10. Generate standards-aware chunks and their source rows.
@@ -1173,7 +1173,7 @@ The intended build sequence is:
 14. Generate document embeddings only after the catalog gate passes.
 15. Build lexical indexes.
 16. Build vector artifacts.
-17. Generate static review reports.
+17. Complete the static review reports with canonical-tree, chunk, cross-reference, provenance, and evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
 18. Run regression evaluation and enforce the documented quality gates.
 19. Confirm that no release-blocking parser, catalog, security, integrity, or document-review finding remains open.
 20. Assemble a candidate release.
@@ -1301,7 +1301,9 @@ Lazy embedding and reranker model assets are part of the exhaustive release arti
 
 MCP tool calls that trigger lazy loading of the query embedding model or the reranker should emit progress notifications guarded by a client-supplied progress token, so the client can display loading state instead of assuming a stalled call. A call is `cold` when it loads at least one required lazy model, `warm` when every model it uses was already resident, and `model_free` when its selected path uses no model. Section 18 refers to this contract rather than defining a second timeout policy.
 
-Runtime configuration declares an overall request deadline and a per-model load deadline. A cold caller waits no longer than the earlier of those deadlines. If the model-load deadline expires, the shared load attempt is aborted, its single-flight state is cleared, and explicit `hybrid` or `high_accuracy` calls fail with `feature_unavailable` and safe detail `reason: model_load_timeout`; an `auto` call may continue through an already available path within the request deadline and emits `retrieval_capability_unavailable`. If the overall request deadline expires first, processing is cancelled and no partial success is returned. Warm and model-free calls are subject only to the overall request deadline. These configured values and the outcome are recorded in performance results.
+Runtime configuration declares an overall tool-call deadline and a per-model load deadline. A cold caller waits no longer than the earlier of those deadlines. If the model-load deadline expires, the shared load attempt is aborted, its single-flight state is cleared, and explicit `hybrid` or `high_accuracy` calls fail with `feature_unavailable` and safe detail `reason: model_load_timeout`; an `auto` call may continue through an already available path within the overall deadline and emits `retrieval_capability_unavailable`.
+
+If the overall deadline expires first for any cold, warm, or model-free tool call, request-specific work stops promptly, temporary resources are released, and no partial success is published. The server returns exactly one `isError: true` tool result with `code: request_deadline_exceeded`, `phase: runtime`, `severity: blocking`, the code-owned message `Request deadline exceeded`, and safe details limited to `operation` and configured `deadline_ms`; it emits no success or second response. Expiry detaches that caller from a shared model-load attempt but does not abort an attempt still serving another live caller. Client cancellation and deadline expiry race through one atomic terminal-state transition ordered by monotonic observation time: cancellation that wins follows the Section 22 non-response rule, while deadline expiry that wins returns the typed error even if cancellation arrives later. Configured values, winning outcome, and latency are recorded in performance results.
 
 Lazy initialization is single-flight per model, with at most one model-load attempt running across the process: concurrent callers join the bounded attempt rather than starting duplicate loads. Waiting callers remain independently cancellable. A failed or timed-out load clears the single-flight state but opens a negative-cache cooldown: 30 seconds after the first failure, doubling after consecutive failures to a 10-minute cap. Calls during cooldown do not trigger a loader; explicit modes fail with `feature_unavailable` and safe detail `reason: model_load_backoff`, while `auto` may use an available model-free path with `retrieval_capability_unavailable`. A successful load resets the failure count. The configured deadlines, cooldown state, and attempt count are observable without exposing model paths.
 
@@ -1463,6 +1465,7 @@ Initial categories:
 - `evidence_insufficient`
 - `release_validation_failed`
 - `request_cancelled`
+- `request_deadline_exceeded`
 
 MCP responses should carry relevant warnings alongside evidence.
 
@@ -1491,8 +1494,9 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `evidence_insufficient` | Runtime valid search with no adequate support | advisory | In-band warning on a successful tool result |
 | `release_validation_failed` | Release candidate gate | blocking | Release report and non-zero builder exit |
 | `request_cancelled` | Runtime honored MCP cancellation | blocking | Non-response runtime event and cancellation metric; no tool result is emitted |
+| `request_deadline_exceeded` | Runtime server-enforced overall tool-call deadline | blocking | Exactly one `isError: true` tool result; no partial or later response |
 
-The revision-specific JSON-RPC errors for malformed requests, unknown methods, and `resources/read` misses are protocol-owned errors, not ClauseSift diagnostic codes. Warnings use the object contract from Section 21. Tool errors use the same stable code vocabulary plus a human-readable message and optional safe details. Tests must exercise every routing-table row, assert the two resource-miss wire codes and absence of an empty-content fallback, and verify that honored cancellation emits no tool response.
+The revision-specific JSON-RPC errors for malformed requests, unknown methods, and `resources/read` misses are protocol-owned errors, not ClauseSift diagnostic codes. Warnings use the object contract from Section 21. Tool errors use the same stable code vocabulary plus a human-readable message and optional safe details. In addition to each tool's row-specific domain errors in Section 22, any tool call may return `request_deadline_exceeded` under the universal deadline contract above. Tests must exercise every routing-table row, assert the two resource-miss wire codes and absence of an empty-content fallback, verify that honored cancellation emits no tool response, and deterministically exercise both sides of the cancellation/deadline race without a duplicate response.
 
 ---
 
@@ -1569,7 +1573,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 ### 34.2 Integration tests
 
 - parser adapter to canonical model;
-- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that construct or cache no canonical artifact and leave the active release unchanged, and a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
+- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete parser-validation report before blocking, construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
 - a deliberately invalid catalog that fails at step 13 and invokes or caches no embedding, lexical-index, or vector-index builder while leaving the active release unchanged;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
@@ -1578,7 +1582,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - rejection of a lazy model with a changed, missing, extra, or pickle-backed weight artifact before loader invocation, routed as `release_integrity_failed` without a partial result, followed by release quarantine, non-zero process exit, and failed restart until rollback or repair;
 - CLI search;
 - MCP tool invocation;
-- MCP compatibility for `2026-07-28` and `2025-11-25`, including structured output, pagination, `-32602` versus `-32002` resource misses, `-32603` external-original integrity failures with required `code`, `phase`, and `severity`, no empty-content fallback, and no tool response after honored cancellation;
+- MCP compatibility for `2026-07-28` and `2025-11-25`, including structured output, pagination, `-32602` versus `-32002` resource misses, `-32603` external-original integrity failures with required `code`, `phase`, and `severity`, no empty-content fallback, exactly one typed tool error after server deadline expiry, and no tool response after honored cancellation;
 - indexed query plans for exact clause, jurisdiction, discipline, status, and document-type filters;
 - a target-edition catalogue change that invalidates cross-references and release assembly while an unrelated parse cache remains valid;
 - a standard document with an unresolved reference that ships only with an advisory and no target IDs, contrasted with a critical document whose same unresolved status blocks publication;
