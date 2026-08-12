@@ -490,6 +490,8 @@ parser_confidence
 attributes
 ```
 
+A non-null `clause_number` declares that the node is independently addressable by exact clause lookup. It must contain the canonical normalized, non-empty identifier for that document; descendants that are not independently addressable keep it null rather than copying an ancestor's number for display. The catalog constraints in Section 14.1 make every non-null `(document_id, clause_number)` unique, so exact lookup cannot select between two canonical subtrees.
+
 ### 12.2 Initial node types
 
 - `document`
@@ -558,6 +560,8 @@ embedding_text
 
 `document_id` is the immutable identity of one manifested edition. `edition` remains the human-readable version label in the document record; chunks do not introduce a second `document_version` concept.
 
+Every persisted chunk has non-empty source-faithful `original_text`. Chunk membership records the ordered, half-open UTF-8 byte span contributed by each member node; offsets must fall on code-point boundaries. Full-node membership uses the entire encoded `nodes.original_text`. The versioned chunk projection joins those spans with its declared source-faithful separator, while hierarchy and retrieval enrichment appear only in `search_text` or `embedding_text`.
+
 ### 13.3 Context integrity
 
 The chunker must preserve or link:
@@ -607,16 +611,18 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 | Table | Required constraints |
 | --- | --- |
 | `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_content_hash`, and `source_file_hash` `NOT NULL`; unique `(document_code, edition)`. |
-| `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for roots or sequence boundaries; each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
-| `chunks` | Globally unique `chunk_id` primary key; `document_id`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
-| `chunk_nodes` | `document_id`, `chunk_id`, and `node_id` `NOT NULL`; composite primary key `(chunk_id, node_id)`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
+| `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `clause_number` is either null or a normalized non-empty exact-lookup key, with a unique partial key `(document_id, clause_number) WHERE clause_number IS NOT NULL`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for roots or sequence boundaries; each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
+| `chunks` | Globally unique `chunk_id` primary key; `document_id`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
+| `chunk_nodes` | `document_id`, `chunk_id`, `node_id`, `member_order`, `node_text_start`, and `node_text_end` `NOT NULL`; composite primary key `(chunk_id, node_id)` and unique `(chunk_id, member_order)`; checks require zero-based `member_order`, `node_text_start >= 0`, and `node_text_end > node_text_start`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
 | `document_jurisdictions` and `document_disciplines` | Both columns `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
 | `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; unique `(document_id, chunk_id)`; page span check enforces positive ordered pages. |
 | `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, and resolution status `NOT NULL`; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. `source_edition` and resolved `target_edition` are derived from the joined document records rather than independently writable values. |
 
 Release validation enforces a total one-to-one mapping between chunks and sources: every chunk admitted to the release has exactly one source row, and every source row names that chunk's document. The unique key rejects duplicate mappings and the ownership foreign key rejects orphan or cross-document sources; an anti-join for chunks without a source is a blocking catalog invariant before index assembly or activation. The runtime opens only a catalog that passed this check.
 
-Release validation also enforces exact-lookup coverage. Every canonical clause node addressable by `(document_id, clause_number)` must have at least one covering chunk through `chunk_nodes`, and the union of those chunks' memberships must include every node in the clause subtree that has source-faithful text, table-cell content, or a source span. A recursive coverage query reports the clause and each uncovered node; any zero-chunk clause or uncovered retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality, this guarantees that an existing clause can always produce the non-empty, complete `get_clause` result required by Section 22.
+Release validation reconstructs each chunk's `original_text` by sorting its `chunk_nodes` rows by the gap-free `member_order`, checking that every half-open byte span is within the referenced non-null `nodes.original_text` and starts and ends on UTF-8 code-point boundaries, extracting those spans, and joining them with the versioned projection separator. Null or empty chunk text, an invalid membership span, missing or duplicate order positions, and any byte mismatch between the reconstruction and stored `chunks.original_text` block index assembly and activation.
+
+Release validation also enforces exact-key determinism and coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. Every addressable node must have at least one covering chunk through `chunk_nodes`, and the union of those chunks' memberships must include every node in the clause subtree that has source-faithful text, table-cell content, or a source span. A recursive coverage query reports the clause and each uncovered node; any duplicate normalized key, zero-chunk clause, or uncovered retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
 
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
@@ -1523,14 +1529,14 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - manifest validation, including canonical `sha256:<64-lowercase-hex>` form and rejection of placeholders that do not match the selected source;
 - canonical model validation;
 - text normalization;
-- clause-number parsing;
+- clause-number parsing, normalization, nullable non-addressable semantics, and rejection of duplicate exact-addressable `(document_id, clause_number)` keys;
 - every parser-validation heuristic listed in Section 11.3, including deterministic primary selection for a passing below-threshold disagreement and cache invalidation when parser roles change;
 - citation generation;
 - query token detection;
 - rank fusion;
 - context expansion rules, including required empty arrays for false include flags and true flags with no matching relation;
 - exact clause lookup returning every covering chunk in canonical order across independently chunked subclauses, whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs;
-- rejection of duplicate source mappings, release-admitted chunks with no source, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with incomplete `chunk_nodes` coverage;
+- rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with incomplete `chunk_nodes` coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
