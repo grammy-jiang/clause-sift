@@ -384,7 +384,9 @@ source_file: corpus/originals/AS1668.1-2015.pdf
 sha256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-Manifest YAML must be loaded with a safe loader that rejects custom tags, then validated against a versioned schema with unknown fields rejected. SHA-256 values use the canonical string form `sha256:` followed by exactly 64 lowercase hexadecimal characters; bare digests, uppercase characters, and surrounding whitespace are invalid. The non-zero value above is illustrative and registration must replace it with the digest calculated from the selected source bytes before human approval. `sha256` is mandatory and non-null for any manifest admitted to a build. Approval records the canonical manifest-content hash, and the builder must reject or re-review a manifest whose bytes change between approval and ingestion.
+Registration computes `manifest_bytes_hash` over the exact manifest file bytes before decoding, then loads the YAML with a safe loader that rejects custom tags and validates it against a versioned schema with unknown fields rejected. It separately computes `manifest_content_hash` over the schema-normalized canonical representation. SHA-256 values use the canonical string form `sha256:` followed by exactly 64 lowercase hexadecimal characters; bare digests, uppercase characters, and surrounding whitespace are invalid. The non-zero value above is illustrative and registration must replace it with the digest calculated from the selected source bytes before human approval. `sha256` is mandatory and non-null for any manifest admitted to a build.
+
+The immutable approval record stores both manifest hashes. Before ingestion, the builder recomputes the raw-byte hash and requires exact equality with the approved `manifest_bytes_hash`, then safe-loads and canonicalizes the manifest and requires equality with the approved `manifest_content_hash`. Any byte change, including comments, whitespace, encoding, or key order that preserves canonical content, invalidates the approval and requires human re-review; changing either approved hash invalidates the affected build and release-assembly cache entries.
 
 `release_tier` is either `critical` or `standard`. A critical document is one whose omission or structurally incorrect parsing can invalidate a release; it is subject to the dual-parser and release-blocking rules in Section 11.3.
 
@@ -545,6 +547,8 @@ Fixed-size character chunking is not the primary strategy.
 chunk_id
 document_id
 node_ids
+chunk_kind
+canonical_order
 clause_number
 heading_path
 node_type
@@ -561,6 +565,8 @@ embedding_text
 `document_id` is the immutable identity of one manifested edition. `edition` remains the human-readable version label in the document record; chunks do not introduce a second `document_version` concept.
 
 Every persisted chunk has non-empty source-faithful `original_text`. Chunk membership records the ordered, half-open UTF-8 byte span contributed by each member node; offsets must fall on code-point boundaries. Full-node membership uses the entire encoded `nodes.original_text`. The versioned chunk projection joins those spans with its declared source-faithful separator, while hierarchy and retrieval enrichment appear only in `search_text` or `embedding_text`.
+
+`chunk_kind` is a closed, versioned enum covering every representation emitted by the chunker, and the chunker configuration assigns every kind a unique rank. The builder deduplicates the exact representation key `(chunk_kind, ordered (node_id, node_text_start, node_text_end) memberships)`, sorts each document's remaining chunks by `(first member node canonical order, first member byte start, chunk-kind rank, last member node canonical order, last member byte end, SHA-256 of the ordered membership tuples, chunk_id)`, and persists a dense zero-based `canonical_order`. The final `chunk_id` tie-breaker is itself deterministically derived from the unchanged chunk inputs. Release validation recomputes the representation keys and ordering and rejects a duplicate representation, gap, duplicate position, unknown kind, or mismatch; runtimes order evidence by persisted `canonical_order` ascending.
 
 ### 13.3 Context integrity
 
@@ -610,9 +616,9 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 
 | Table | Required constraints |
 | --- | --- |
-| `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_content_hash`, `source_file_hash`, and positive `source_page_count` `NOT NULL`; unique `(document_code, edition)`. |
+| `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_bytes_hash`, `manifest_content_hash`, `source_file_hash`, and positive `source_page_count` `NOT NULL`; unique `(document_code, edition)`. |
 | `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `clause_number` is either null or a normalized non-empty exact-lookup key, with a unique partial key `(document_id, clause_number) WHERE clause_number IS NOT NULL`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for roots or sequence boundaries; each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
-| `chunks` | Globally unique `chunk_id` primary key; `document_id`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
+| `chunks` | Globally unique `chunk_id` primary key; `document_id`, closed-enum `chunk_kind`, dense zero-based `canonical_order`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)` and unique `(document_id, canonical_order)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
 | `chunk_nodes` | `document_id`, `chunk_id`, `node_id`, `member_order`, `node_text_start`, and `node_text_end` `NOT NULL`; composite primary key `(chunk_id, node_id)` and unique `(chunk_id, member_order)`; checks require zero-based `member_order`, `node_text_start >= 0`, and `node_text_end > node_text_start`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
 | `node_page_spans` | `document_id`, `node_id`, half-open UTF-8 byte `node_text_start`, `node_text_end`, `page_number`, and `mapping_order` `NOT NULL`; primary key `(node_id, node_text_start, node_text_end, page_number)` and unique `(node_id, mapping_order)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`; checks require valid non-empty byte spans, non-negative mapping order, positive pages, and schema-valid optional bounding boxes. |
 | `document_jurisdictions` and `document_disciplines` | Both columns `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
@@ -625,7 +631,7 @@ Release validation reconstructs each chunk's `original_text` by sorting its `chu
 
 Release validation also derives source provenance rather than trusting stored page numbers. Every byte in each `chunk_nodes` member span must be covered without a gap by that node's gap-free ordered `node_page_spans`; every mapping page must be within `1..documents.source_page_count`. For each chunk, the validator computes the minimum and maximum intersecting page numbers and requires its sole `sources` row to store exactly those values. Evidence bounding boxes are projected only from the intersecting mappings, in page and mapping order, and must lie on pages within that derived span. A missing mapping, an out-of-range page or box, or any stored-versus-derived source span mismatch blocks index assembly and activation.
 
-Release validation also enforces exact-key determinism and coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. Every addressable node must have at least one covering chunk through `chunk_nodes`, and the union of those chunks' memberships must include every node in the clause subtree that has source-faithful text, table-cell content, or a source span. A recursive coverage query reports the clause and each uncovered node; any duplicate normalized key, zero-chunk clause, or uncovered retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
+Release validation also enforces exact-key determinism and subtree coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. For this check, a retrievable node has non-empty source-faithful `original_text`, including any serialized table-cell text; an empty page-only structural anchor is contextual rather than a retrievable chunk member. For each addressable clause, its covering set is every distinct chunk with a `chunk_nodes` membership on a retrievable node in that clause's subtree; the set must be non-empty, and its union must include every retrievable subtree node. An addressable structural root whose own `original_text` is empty needs no zero-length direct membership, even if it carries a contextual page mapping: fully covered retrievable descendants satisfy the clause. An addressable subtree with no retrievable self or descendant content remains invalid. A recursive coverage query reports the clause and each uncovered node; any duplicate normalized key, empty covering set, contentless addressable subtree, or uncovered retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
 
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
@@ -1149,7 +1155,7 @@ The intended build sequence is:
 
 1. Scan the inbox and registered source files.
 2. Calculate source hashes.
-3. Load and validate manifests.
+3. Recompute and verify approved raw manifest-byte hashes, then safe-load, canonicalize, and validate manifests and their approved content hashes.
 4. Detect added, changed, and removed documents.
 5. Select parser routes.
 6. Produce parser-neutral artifacts for every selected route.
@@ -1185,6 +1191,7 @@ The cache identity should include:
 
 ```text
 source_file_hash
+manifest_bytes_hash
 manifest_content_hash
 parser_name
 parser_version
@@ -1210,13 +1217,13 @@ The list above is the dependency vocabulary, not one flat cache key. Each artifa
 
 | Cached artifact | Required cache-identity inputs |
 | --- | --- |
-| Canonical parse | Source-file hash; approved manifest-content hash; the ordered tuple `(role, adapter name, adapter version, adapter configuration, parser-neutral artifact SHA-256, OCR configuration)` for every selected route; comparison-gate implementation version and configuration when comparison is required; normalizer version; canonical schema version; dependency-lock hash; build-toolchain fingerprint. A critical document's identity therefore includes both `canonical_primary` and `independent_comparator` tuples in role order. |
+| Canonical parse | Source-file hash; approved manifest-byte and manifest-content hashes; the ordered tuple `(role, adapter name, adapter version, adapter configuration, parser-neutral artifact SHA-256, OCR configuration)` for every selected route; comparison-gate implementation version and configuration when comparison is required; normalizer version; canonical schema version; dependency-lock hash; build-toolchain fingerprint. A critical document's identity therefore includes both `canonical_primary` and `independent_comparator` tuples in role order. |
 | Chunks | Canonical-tree artifact hash; chunker version and configuration; chunk schema version. |
 | Cross-references | Canonical-tree artifact hash; approved `reference_edition_overrides`; cross-reference resolver version and configuration; digest of the sorted target catalogue `(document_id, document_code, edition, canonical_node_tree_hash)`. |
 | Embeddings | Ordered embedding-text hashes from the chunk artifact; embedding model identifier and revision; local model-artifact SHA-256 or external-provider request parameters; embedding configuration; dependency-lock hash; build-toolchain fingerprint. |
 | Lexical index | Ordered search-text and metadata hashes from the chunk artifact; lexical-index engine, version, configuration, and schema version. |
 | Vector index | Embedding artifact hash; vector-index engine, version, distance metric, configuration, dependency-lock hash, and build-toolchain fingerprint. |
-| Release assembly | Hashes of the canonical catalogue and every admitted derived artifact; approved manifests; release schema and configuration; evaluation-corpus and gate-result hashes; dependency-lock hash; build-toolchain fingerprint. |
+| Release assembly | Hashes of the canonical catalogue and every admitted derived artifact; approved manifest-byte and manifest-content hashes; release schema and configuration; evaluation-corpus and gate-result hashes; dependency-lock hash; build-toolchain fingerprint. |
 
 Adding or changing a target edition therefore invalidates affected cross-reference artifacts even when the source PDF and its own canonical tree are unchanged. Downstream release assembly is invalidated by the changed cross-reference artifact hash.
 
@@ -1530,7 +1537,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 
 ### 34.1 Unit tests
 
-- manifest validation, including canonical `sha256:<64-lowercase-hex>` form and rejection of placeholders that do not match the selected source;
+- manifest validation, including canonical `sha256:<64-lowercase-hex>` form, rejection of placeholders that do not match the selected source, and rejection of a raw comment, whitespace, encoding, or key-order change that preserves canonical content but changes the approved manifest-byte hash;
 - canonical model validation;
 - text normalization;
 - clause-number parsing, normalization, nullable non-addressable semantics, and rejection of duplicate exact-addressable `(document_id, clause_number)` keys;
@@ -1539,13 +1546,13 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - query token detection;
 - rank fusion;
 - context expansion rules, including required empty arrays for false include flags and true flags with no matching relation;
-- exact clause lookup returning every covering chunk in canonical order across independently chunked subclauses, whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs;
+- exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks;
 - rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, missing or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the chunk-derived projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with incomplete `chunk_nodes` coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
 - tier-specific cross-reference severity and release-gate selection;
-- per-artifact cache-key dependency selection, parser-role and comparison-configuration invalidation, and target-catalogue invalidation;
+- per-artifact cache-key dependency selection, raw manifest-byte invalidation, parser-role and comparison-configuration invalidation, and target-catalogue invalidation;
 - release checksum verification;
 - identifier and path-containment validation;
 - central response-field and diagnostic-detail allowlists, including path injection as an extra field and inside allowed structured and legacy string fields;
