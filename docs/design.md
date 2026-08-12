@@ -458,6 +458,8 @@ Comparison mode is mandatory for every `critical` document and optional for a `s
 
 For a critical document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds its configured threshold. The static review report must show both outputs and every disagreement. A blocked document may proceed only after correcting the parser, source, or manifest and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
 
+The versioned parser-routing configuration must name an ordered `canonical_primary` and `independent_comparator` for every critical document, either directly or through a deterministic rule over manifested fields. Both adapter identities, versions, configurations, and assigned roles are build inputs. After both single-parser gates and the comparison gate pass, the builder selects the `canonical_primary` parser-neutral artifact byte-for-byte as the sole input to deterministic canonical-model construction; the comparator is validation-only. Below-threshold wording or OCR differences therefore resolve to the primary output, never to field-by-field merging, majority selection, or build-order choice. Changing either role invalidates the parse and all downstream cache entries and requires a complete rebuild and review. With unchanged source bytes, ordered roles, adapters, and configurations, both the selected parser artifact and resulting canonical model must be byte-identical across rebuilds.
+
 A critical document that fails either single-parser quality thresholds or the dual-parser comparison gate must not enter a production release.
 
 ---
@@ -609,8 +611,10 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 | `chunks` | Globally unique `chunk_id` primary key; `document_id`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
 | `chunk_nodes` | `document_id`, `chunk_id`, and `node_id` `NOT NULL`; composite primary key `(chunk_id, node_id)`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
 | `document_jurisdictions` and `document_disciplines` | Both columns `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
-| `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; page span check enforces positive ordered pages. |
+| `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; unique `(document_id, chunk_id)`; page span check enforces positive ordered pages. |
 | `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, and resolution status `NOT NULL`; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. `source_edition` and resolved `target_edition` are derived from the joined document records rather than independently writable values. |
+
+Release validation enforces a total one-to-one mapping between chunks and sources: every chunk admitted to the release has exactly one source row, and every source row names that chunk's document. The unique key rejects duplicate mappings and the ownership foreign key rejects orphan or cross-document sources; an anti-join for chunks without a source is a blocking catalog invariant before index assembly or activation. The runtime opens only a catalog that passed this check.
 
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
@@ -1512,12 +1516,12 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - canonical model validation;
 - text normalization;
 - clause-number parsing;
-- every parser-validation heuristic listed in Section 11.3;
+- every parser-validation heuristic listed in Section 11.3, including deterministic primary selection for a passing below-threshold disagreement and cache invalidation when parser roles change;
 - citation generation;
 - query token detection;
 - rank fusion;
 - context expansion rules;
-- exact clause lookup returning every chunk of a token-limit-split clause in canonical order without aggregating source IDs;
+- exact clause lookup returning every chunk of a token-limit-split clause in canonical order without aggregating source IDs, plus rejection of duplicate source mappings and release-admitted chunks with no source;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
@@ -1531,7 +1535,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 ### 34.2 Integration tests
 
 - parser adapter to canonical model;
-- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that leave the active release unchanged;
+- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that leave the active release unchanged, and a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
