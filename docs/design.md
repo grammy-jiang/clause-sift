@@ -27,6 +27,8 @@ The central architectural decision is to separate the system into two parts:
 - an offline knowledge-base compiler that performs expensive parsing, OCR, structural analysis, chunking, embedding, indexing, validation, and release generation;
 - a lightweight, read-only runtime that loads a compiled knowledge-base release and serves evidence through a Python API, CLI, and MCP server.
 
+The compiler materializes a canonical **Evidence Graph**—the storage-neutral logical model formed by canonical evidence nodes and their typed structural and semantic relationships—together with rebuildable retrieval indexes. The graph organizes source-grounded evidence; it never replaces the original documents as authority.
+
 This design allows ClauseSift to use slow, high-quality processing during infrequent document builds while keeping normal query operations fast and operationally simple.
 
 ---
@@ -187,7 +189,7 @@ Parser anomalies, unresolved references, low-confidence OCR, conflicting edition
 flowchart LR
     U[Engineer] --> C[Claude Desktop / Claude Code]
     C <-->|MCP stdio| R[ClauseSift Runtime]
-    R --> K[Compiled KB Release]
+    R --> K[Compiled KB Release: Evidence Graph and indexes]
     B[ClauseSift Builder] --> K
     S[Local source documents] --> B
     M[Human-maintained manifests] --> B
@@ -242,6 +244,35 @@ flowchart TB
     M --> Runtime
     EP --> MCP[MCP / Python / CLI]
 ```
+
+### 7.1 Evidence Graph architecture
+
+The **Evidence Graph** is ClauseSift's versioned, deterministic, source-grounded logical graph of canonical engineering-evidence nodes and typed relationships. Its nodes are the canonical document-model nodes in Section 12; its edges are the validated structural relationships and typed semantic or cross-document relationships described by the catalog and Section 20. The name describes a logical contract, not a storage product: v0.1 persists the graph relationally in `knowledge.sqlite` and requires no Neo4j, RDF, SPARQL service, generic graph database, or universal knowledge graph.
+
+The architecture has five distinct layers:
+
+```mermaid
+flowchart LR
+    A[Authoritative sources: files, pages, manifests] --> G[Canonical Evidence Graph in SQLite]
+    G --> I[Derived retrieval artifacts]
+    Q[Runtime query] --> I
+    I --> S[Bounded runtime evidence subgraph]
+    G --> S
+    S --> P[Evidence Package]
+    P --> C[MCP, Python, and CLI clients]
+```
+
+1. **Authoritative source layer:** original files and pages plus human-reviewed manifests. These remain authoritative for text, identity, edition, status, and other manifest-owned facts.
+2. **Canonical Evidence Graph:** immutable canonical nodes and validated relationships compiled for one release. It preserves document structure, source identity, applicability, dependencies, cross-references, and the information required to reconstruct provenance.
+3. **Derived retrieval artifacts:** lexical indexes, embeddings, vector indexes, and caches. They accelerate candidate selection and are rebuildable from release inputs; they are never graph or source authority.
+4. **Runtime evidence subgraph:** a bounded, deterministic selection consisting of retrieval seeds and context attached under declared relationship and traversal rules. It is a per-request view, not a mutable persisted graph.
+5. **Evidence Package:** the client-facing serialization of that selected subgraph, including original evidence, citations, provenance, retrieval metadata, and visible warnings.
+
+Every published graph is bound to the release ID, graph-schema version, vocabulary version, source hashes, and deterministic build inputs. Node identity is independent of a database engine. Every authoritative graph edge has declared semantics and either source provenance or an explicitly identified deterministic derivation; the word “graph” does not permit arbitrary LLM-generated facts. A future probabilistic relationship class would require a separate typed contract, provenance, confidence and review policy, and cannot be silently promoted to an authoritative edge.
+
+Unresolved references remain explicit non-navigable records. Cycles in structural ownership are invalid; cycles among otherwise valid semantic references may exist but do not authorize unbounded traversal. Superseded editions and duplicate-looking requirements remain distinct through release-scoped document and node identity. Missing optional coordinates do not erase a node when its source text and document/clause identity are valid, but the absence remains visible in provenance and warnings. Table rows retain inherited headers, units, and parent context through declared relationships rather than retrieval-time guessing. New node or relationship types require versioned vocabulary/schema changes and must fail visibly in an older runtime.
+
+Sections 12–14 define graph nodes and relational persistence, Sections 19–20 define context and semantic relationships, and Section 21 defines serialization. Later sections may refine relationship, provenance, traversal, and conflict contracts, but they must reuse this layered model rather than introduce a parallel graph or entity system.
 
 ---
 
@@ -478,7 +509,7 @@ A document that fails any applicable single-parser or comparison gate must not e
 
 ## 12. Canonical document model
 
-The canonical document model isolates the rest of ClauseSift from parser-specific output formats.
+The canonical document model isolates the rest of ClauseSift from parser-specific output formats. Its canonical nodes are the node set of the Evidence Graph; parser-native objects and retrieval chunks are not a parallel entity graph.
 
 ### 12.1 Core node fields
 
@@ -612,7 +643,7 @@ SQLite should store:
 - parser warnings;
 - release-admission metadata known at the catalog gate.
 
-SQLite is the source of truth for structured knowledge-base metadata.
+SQLite is the authoritative persisted representation of the compiled Evidence Graph and other structured knowledge-base metadata. This authority is about the deterministic compiled representation; original documents and human-reviewed manifests retain the evidence authority defined in Section 5.2.
 
 The current run's evaluation results are not written back into `knowledge.sqlite`: the candidate catalog is fully materialized and becomes byte-stable at step 13, before evaluation runs. Step 17 writes the authoritative, versioned `evaluation-results.json`; the static report and release manifest refer to that artifact by hash and carry only its derived summary. Post-gate evaluation, candidate-validation, activation, and rollback records likewise live outside the immutable catalog. No later build step reopens `knowledge.sqlite` for mutation.
 
@@ -846,6 +877,8 @@ After retrieval, ClauseSift should inspect document structure and attach require
 
 Context expansion is structure-driven rather than a fixed previous/next chunk window.
 
+At runtime, context expansion constructs the bounded evidence subgraph defined in Section 7.1. It may traverse only declared, release-validated relationship classes and must preserve the source identity and provenance of every selected node or relation.
+
 Example rule:
 
 ```text
@@ -916,13 +949,13 @@ Initial relation types:
 - `amends`
 - `applies_subject_to`
 
-The first release will use relational cross-reference data, not a generic graph database.
+These records are typed semantic edges in the logical Evidence Graph. Structural edges may remain encoded by validated node/chunk foreign keys rather than duplicated into one generic edge table. The first release will use relational graph data, not a generic graph database.
 
 ---
 
 ## 21. Evidence package
 
-ClauseSift returns structured evidence, not only prose.
+ClauseSift returns structured evidence, not only prose. An Evidence Package is the serialized client-facing projection of one bounded runtime evidence subgraph; it does not transfer graph authority to the client or collapse distinct source nodes into a generated claim.
 
 Example:
 
