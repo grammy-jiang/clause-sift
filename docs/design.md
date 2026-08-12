@@ -664,7 +664,7 @@ Public human-readable lookup and filter keys use a different shared constraint: 
 | `node_page_spans` | `document_id`, `node_id`, half-open UTF-8 byte `node_text_start`, `node_text_end`, `page_number`, and `mapping_order` `NOT NULL`; primary key `(node_id, node_text_start, node_text_end, page_number)` and unique `(node_id, mapping_order)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`; checks require valid non-empty byte spans, non-negative mapping order, page numbers in `1..2,147,483,647`, and schema-valid optional bounding boxes. Release validation requires every non-empty node's rows, in dense `mapping_order`, to form an exact non-overlapping partition of `[0, byte_length(nodes.original_text))`; adjacent rows meet at one boundary, while any overlap, duplicate coverage, gap, or out-of-order interval blocks release. An empty-text structural node has no span row. |
 | `document_jurisdictions` and `document_disciplines` | Both value columns are 1-128-scalar canonical normalized strings and `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
 | `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; unique `(document_id, chunk_id)`; page span check enforces ordered endpoints in `1..2,147,483,647`. |
-| `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, normalized parsed target fields, and resolution status `NOT NULL` where the reference grammar supplies them; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. Source and resolved-target document code, edition, and clause are read-only join projections rather than independently writable base columns. |
+| `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, closed-enum relation type and relation origin, raw text, normalized parsed target fields, and resolution status `NOT NULL` where the reference grammar supplies them; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. Endpoint-type checks and relation-specific cycle rules follow Section 20. All ownership foreign keys use `ON DELETE RESTRICT`. Source and resolved-target document code, edition, and clause are read-only join projections rather than independently writable base columns. |
 
 Before any subtree or context query runs, release validation proves that every document's node parent relation is one rooted tree. Each document has exactly one null-parent node of type `document`; every other node has exactly one parent in that document whose canonical order is lower than the child's. A recursive traversal seeded at that root must visit every document node exactly once, and explicit path tracking must report a self-edge, repeated node, disconnected component, or parent cycle. The same gate requires previous/next node links to be reciprocal and to name the immediate canonical-order neighbor or null at the corresponding boundary. A violation blocks index assembly and activation, so runtime traversal never relies on a recursion-depth limit to contain malformed structure. Chunk parent edges must likewise point to a lower chunk `canonical_order`; chunk previous/next links must be reciprocal immediate-order neighbors, which makes the optional chunk hierarchy acyclic and its sequence deterministic.
 
@@ -892,7 +892,49 @@ retrieved requirement
 
 ---
 
-## 20. Cross-reference model
+## 20. Evidence Graph relationship model
+
+### 20.1 Canonical relationship contract
+
+Evidence Graph relationships are either **structural** edges derived from the validated canonical document model or **semantic** edges whose meaning is source-grounded and relation-specific. Each canonical name has one direction and one meaning across parsers, storage adapters, traversal code, reports, and public evidence. Storage may use foreign keys, relation rows, or derived views; those representations must expose the same logical edges.
+
+The canonical structural relations are:
+
+| Relation | Canonical direction and cardinality | Origin, traversal, and cycle policy |
+| --- | --- | --- |
+| `contains` | Immediate parent node → immediate child node. Every non-root canonical node has exactly one incoming `contains`; a parent may have zero or more ordered children. | Derived from `child.parent_node_id`. Ancestor and child traversal is eligible when a tool requests that context. The relation must form the one rooted tree validated in Section 14.1. |
+| `precedes` | Canonical node → its immediate next canonical node in the same document. A node has at most one incoming and one outgoing edge; `previous_node_id` is the validated inverse lookup, not a second relation type. | Derived from reciprocal previous/next fields and canonical order. Optional bounded adjacency traversal may use it. Edges always increase canonical order, so cycles are invalid. |
+
+Chunk parent/sequence links and chunk-to-node membership remain retrieval/projection structure rather than additional canonical Evidence Graph node relations. Notes, exceptions, tables, and appendices obtain their ordinary attachment from `contains`; a semantic edge is added only when its distinct meaning changes validation or traversal behavior.
+
+The initial semantic relations are deliberately limited to the existing vocabulary:
+
+| Relation | Canonical source → target | Cross-document and resolution rule | Origin, context eligibility, and cycle policy |
+| --- | --- | --- | --- |
+| `references` | Any source-bearing node → an addressable node or document root explicitly cited by the source. | Allowed. A navigable edge exists only after unique resolution. An absent or ambiguous target remains an unresolved occurrence with no edge. | `source_text`; eligible only for requested direct-reference context. Cycles are allowed because source documents may cite each other, but traversal is bounded and uses a visited set. |
+| `depends_on` | A requirement, clause, subclause, or table row → the requirement, clause, subclause, definition, table, or document on which its interpretation or satisfaction explicitly depends. | Allowed only for an explicit, uniquely resolved dependency. | `source_text` or `manifest`; eligible for dependency/applicability context. Source-grounded cycles may be retained with a warning, but never authorize recursive unbounded traversal. |
+| `exception_to` | An `exception` node → the requirement, clause, subclause, or table row whose effect it limits. | Same-document by default; cross-document only when an explicit citation resolves uniquely. | `source_text`; runtime finds exceptions from the target by reverse traversal when requested. Self-edges and `exception_to` cycles are invalid. |
+| `defines` | A `definition` node → the document, part, chapter, section, clause, subclause, or appendix scope whose terminology it governs. | Same-document by default; an external definition uses `references` or `depends_on` unless the source explicitly declares cross-document scope and resolves uniquely. | `source_text`; eligible by reverse lookup from a seed within the governed scope. Self-edges and `defines` cycles are invalid. |
+| `supersedes` | A newer document root → each older document root it replaces. | Cross-document by definition. Both editions remain distinct release nodes; an unavailable or ambiguous older edition creates no navigable edge. | Human-reviewed `manifest` authority. Extracted text is only a proposed occurrence until reconciled. Not default answer context; eligible for explicit version work. Self-edges and cycles are invalid. |
+| `amends` | An amending document root or explicit amendment clause → the document root or addressable node it changes. | Cross-document allowed and requires unique target resolution. | Human-reviewed `manifest` authority or reconciled `source_text`; eligible for explicit version work. Self-edges and cycles in the amendment/supersession subgraph are invalid. |
+| `applies_subject_to` | A governed requirement, clause, subclause, or table row → the condition, exception, clause, requirement, or table that qualifies its applicability. | Cross-document only for an explicit, uniquely resolved condition. | `source_text` or `manifest`; eligible for applicability context. Self-edges and same-relation cycles are invalid. |
+
+For example, direction never changes with the query:
+
+```text
+exception node --exception_to--> affected requirement
+governed requirement --applies_subject_to--> applicability condition
+citing clause --references--> cited clause
+new document root --supersedes--> old document root
+```
+
+`relation_origin` is the closed v0.1 enum `structural`, `source_text`, or `manifest`. Structural relations are derived rather than stored as cross-reference occurrences. v0.1 admits no generated/probabilistic semantic edge. A future generated candidate requires a schema/vocabulary version change, explicit generator identity and confidence, review policy, and a non-authoritative state; it cannot become navigable merely because a model emitted it.
+
+Every source occurrence is retained with its own stable occurrence ID and source evidence. For resolved semantic relations, the logical edge identity is `(source_document_id, source_node_id, relation_type, target_document_id, target_node_id)`. Repeated citations with that identity normalize to one runtime edge whose ordered provenance list contains every occurrence; evidence is never discarded. If source text explicitly enumerates several targets, the builder emits one occurrence and edge per explicit target. A phrase with several candidate interpretations is `ambiguous_edition` or otherwise unresolved, not a multi-target guess.
+
+Release validation enforces the endpoint matrix, origin policy, target ownership, semantic identity, and cycle rules above. A semantic self-edge is rejected except where `references` or `depends_on` faithfully records an explicit source statement; those allowed cycles remain bounded at traversal. Structural hierarchy cycles always block release. Relation vocabulary additions require a schema and vocabulary version change; unknown relation names fail visibly rather than being mapped to the nearest known type.
+
+### 20.2 Cross-reference extraction and resolution
 
 The build pipeline should detect deterministic references such as:
 
@@ -913,6 +955,7 @@ parsed_target_clause
 target_document_id
 target_node_id
 relation_type
+relation_origin
 resolution_status
 raw_reference_text
 ```
@@ -937,17 +980,7 @@ Release policy is tier-specific and has no count threshold in v0.1:
 
 The release summary records unresolved counts by document, tier, status, and relation type. Runtime context expansion never follows an unresolved row.
 
-Human-reviewed manifest fields are authoritative for `supersedes` and `superseded_by`. An extracted supersession statement is stored as evidence and proposed metadata, but it does not overwrite the manifest. Any disagreement emits `edition_conflict` and blocks a critical document until reviewed.
-
-Initial relation types:
-
-- `references`
-- `depends_on`
-- `exception_to`
-- `defines`
-- `supersedes`
-- `amends`
-- `applies_subject_to`
+Human-reviewed manifest fields are authoritative for `supersedes` and `superseded_by`. An extracted supersession statement is stored as a `source_text` occurrence and proposed metadata, but it does not overwrite or become equivalent to the `manifest` edge. Any disagreement emits `edition_conflict` and blocks a critical document until reviewed.
 
 These records are typed semantic edges in the logical Evidence Graph. Structural edges may remain encoded by validated node/chunk foreign keys rather than duplicated into one generic edge table. The first release will use relational graph data, not a generic graph database.
 
@@ -1666,6 +1699,7 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks and rejection of a candidate chunk containing any retrievable out-of-subtree member or members from two independently addressable branches;
 - rejection of duplicate source mappings, release-admitted chunks with no source, invalid/escaping source locators or mismatched source sizes, null or empty chunk `original_text`, incorrect deepest-common-ancestor citation nodes, invalid member spans or ordering, reconstructed-text mismatches, missing, overlapping, duplicate, gapped, out-of-order, or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the authoritative mapping projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases, including rejection of an existing but semantically wrong target node, code, edition, or document-root target; resolved rows compare parsed code and edition with joined targets, while unresolved rows retain parsed evidence with null target IDs/projections and perform no joined-field equality check;
+- every Section 20 relationship direction, endpoint category, origin, cross-document rule, semantic identity, and cycle policy; fixtures cover duplicate occurrences preserved behind one runtime edge, explicit multi-target citations split into individual edges, ambiguous candidates producing no edge, allowed bounded reference/dependency cycles, forbidden structural/governing cycles, and unknown relation types failing release validation;
 - global identifier scope, ownership-preserving composite foreign keys, rejection of cross-document source/chunk and source-node/document pairs, and registration/generation/schema/release rejection of every public catalog ID outside the exact 1-128-character opaque-ID grammar;
 - exact-maximum and one-over 128-Unicode-scalar values, including multibyte values, for persisted document codes, editions, non-null clause numbers, jurisdictions, and disciplines at registration or parser validation, schema insertion, cache import, and the independent release gate; null clause numbers remain valid, maximum values round-trip through search, exact lookup, clause-resource parsing, output validation, and cursor resume, while over-limit values publish no derived artifact or active release;
 - connection-factory enforcement and readback of `PRAGMA foreign_keys = ON`, runtime `query_only`, zero-row builder/runtime `foreign_key_check`, and rejection of a deliberately injected ownership violation created through an external enforcement-disabled fixture connection;
