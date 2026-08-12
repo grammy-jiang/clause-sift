@@ -1139,8 +1139,8 @@ The intended build sequence is:
 3. Load and validate manifests.
 4. Detect added, changed, and removed documents.
 5. Select parser routes.
-6. Produce canonical documents.
-7. Run parsing validation.
+6. Produce parser-neutral artifacts for every selected route.
+7. Run each adapter's parsing validation and every required dual-parser comparison gate; only after all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents deterministically from it.
 8. Construct clause and node trees.
 9. Generate standards-aware chunks.
 10. Extract and resolve cross-references.
@@ -1535,7 +1535,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 ### 34.2 Integration tests
 
 - parser adapter to canonical model;
-- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that leave the active release unchanged, and a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
+- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that construct or cache no canonical artifact and leave the active release unchanged, and a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
