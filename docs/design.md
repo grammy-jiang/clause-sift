@@ -1173,17 +1173,18 @@ The intended build sequence is:
 14. Generate document embeddings only after the catalog gate passes.
 15. Build lexical indexes.
 16. Build vector artifacts.
-17. Complete the static review reports with canonical-tree, chunk, cross-reference, provenance, and evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
-18. Run regression evaluation and enforce the documented quality gates.
-19. Confirm that no release-blocking parser, catalog, security, integrity, or document-review finding remains open.
-20. Assemble a candidate release.
-21. Validate the release manifest and every required artifact checksum.
-22. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
-23. Publish the release and atomically update the active pointer.
+17. Run the current regression evaluation and durably persist its versioned raw results; an execution failure produces a sanitized failure record rather than skipping report generation.
+18. Complete and finalize the static review reports with canonical-tree, chunk, cross-reference, provenance, and current-run evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
+19. Only after the current evaluation results and report are durable, enforce the documented quality gates.
+20. Confirm that no release-blocking parser, catalog, security, integrity, evaluation, or document-review finding remains open.
+21. Assemble a candidate release.
+22. Validate the release manifest and every required artifact checksum.
+23. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
+24. Publish the release and atomically update the active pointer.
 
 A failed build must leave the active release unchanged.
 
-The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Tests must inject failures at the catalog gate and before and during candidate validation, proving that downstream builders were not called and that neither the active pointer nor the previous release changes.
+The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Evaluation gate enforcement is likewise unreachable until step 18 has finalized a report from the same run ID and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 19 while retaining that diagnostic report. Tests must inject failures at the catalog gate, evaluation execution and quality gate, and before and during candidate validation, proving that the required failure reports remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
 
 ---
 
@@ -1576,6 +1577,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete parser-validation report before blocking, construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
 - a deliberately invalid catalog that fails at step 13 and invokes or caches no embedding, lexical-index, or vector-index builder while leaving the active release unchanged;
+- a current-run evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the failing run ID and raw-result hash or failure record before step 19 blocks, while leaving the active release unchanged;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
 - rejection of pickled/object NumPy arrays and mismatched dtype, shape, size, or checksum;
