@@ -102,7 +102,7 @@ body:
   - type: textarea
     id: proposal_semantics
     attributes:
-      label: Proposed design, semantics, invariants, and edge cases
+      label: Proposed design and semantics
       description: Define the target state precisely enough that another agent can draft the documentation without inventing architecture or semantics.
       placeholder: |
         ## Proposed change
@@ -185,7 +185,7 @@ body:
   - type: textarea
     id: impact_dependencies
     attributes:
-      label: Affected artifacts, implementation implications, dependencies, and sequencing
+      label: Affected artifacts and dependencies
       description: Identify where the change lands and what work it implies before and after this issue.
       placeholder: |
         ## Affected documentation and artifacts
@@ -231,7 +231,7 @@ body:
   - type: textarea
     id: decision_record
     attributes:
-      label: Alternatives, risks, assumptions, open questions, and references
+      label: Alternatives, risks, and open questions
       description: Preserve the reasoning behind the proposed direction and prevent future agents from silently reopening or inventing design decisions.
       placeholder: |
         ## Alternatives considered
@@ -338,7 +338,5 @@ body:
           required: true
         - label: Any implementation work implied by the documentation change is explicitly included, excluded, or identified as follow-up work.
           required: true
-        - label: References are relevant and their significance is explained; external-project features are not presented as ClauseSift requirements without independent justification.
-          required: true
-        - label: The issue does not introduce a dependency, platform, database, framework, or architectural subsystem merely because a reference project uses one.
+        - label: I justified external references and did not adopt external-project dependencies or architecture without independent ClauseSift rationale.
           required: true
