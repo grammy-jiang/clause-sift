@@ -981,6 +981,8 @@ get_clause(
 )
 ```
 
+The lookup resolves one canonical clause node, then returns every persisted chunk required to cover that clause's canonical subtree. An unsplit clause produces one evidence item; a token-limit split produces one evidence item per chunk in ascending canonical chunk order. Each item retains its own `source_id`, page span, bounding boxes, and source-faithful `original_text`; the handler must not aggregate several chunks under one source ID or omit later parts of the clause.
+
 #### `get_context`
 
 Expand a previously returned source ID with its parent conditions, exceptions, notes, tables, and direct references.
@@ -1040,7 +1042,7 @@ The following semantic contract is normative; the JSON Schemas must encode it di
 | Tool | Selection semantics | Success result | Domain-error cases |
 | --- | --- | --- | --- |
 | `search_evidence` | Trimmed non-empty query; values are ORed within each supplied filter list and filter categories are ANDed; `status: null` removes the default active-status filter; `mode` resolves under Section 17. | `{query, retrieval_mode, release, evidence, warnings}` where `evidence` is an ordered array of Section 21 evidence items and `warnings` is an array of typed warning objects. | `identifier_invalid` for malformed filters; `feature_unavailable` for an explicit unsupported mode or bounded load failure; `release_integrity_failed` when a lazy model asset fails its pre-load integrity check. No matches is a success, not an error. |
-| `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. | `{release, evidence, warnings}` with exactly one Section 21 evidence item for the clause. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent. |
+| `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. Resolve the canonical clause node and select all chunks covering its subtree. | `{release, evidence, warnings}` with a non-empty, canonically ordered array of Section 21 evidence items: one for an unsplit clause or one per persisted chunk for a split clause. Every item retains its own `source_id` and source span. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent. |
 | `get_context` | Exact `source_id`; each boolean independently includes that relation class, and false means omission rather than an empty synthetic item. | `{release, source_id, context, warnings}` where `context` has arrays `parents`, `exceptions`, `notes`, `tables`, and `references` for the requested classes, each containing catalog-bound evidence or relation records. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown source. |
 | `get_document_metadata` | Exact opaque `document_id`; no active-edition fallback. | `{release, document}` where `document` contains the safe manifest projection, source hash, review status, and release identity, but no absolute path. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown document. |
 | `list_documents` | Non-null filters are ANDed; each filter value is an exact normalized enum or discipline key; ordering and cursor rules are those stated above. | `{release, items, next_cursor}` where every item is the same safe document-metadata summary and `next_cursor` is string or null. | `identifier_invalid` for a malformed filter, limit, or cursor; `resource_not_found` for a cursor bound to another release. |
@@ -1087,7 +1089,7 @@ The v0.1 resource catalogue is immutable for one server process. The server does
 - A well-formed tool call that fails semantic validation or execution returns a tool result with `isError: true` and a typed error code, for example `identifier_invalid`, `resource_not_found`, or `feature_unavailable`.
 - A valid search with no matching evidence is a successful result with an empty `evidence` array and an `evidence_insufficient` warning. It is not a protocol error.
 - An unknown, well-formed `standards://` resource is never represented as a tool result or an empty `contents` success. `resources/read` returns JSON-RPC `-32602` on the per-request `2026-07-28` path and `-32002` on a `2025-11-25` session. This protocol error is distinct from the ClauseSift `resource_not_found` diagnostic used by tool calls.
-- When a known page resource's external original fails the on-demand containment, size, or hash check, `resources/read` returns JSON-RPC internal error `-32603` on both protocol paths with safe data `{code: "source_hash_mismatch"}`. It returns no `contents`, absolute path, or raw exception text; this denies that resource read without invalidating the immutable release catalogue.
+- When a known page resource's external original fails the on-demand containment, size, or hash check, `resources/read` returns JSON-RPC internal error `-32603` on both protocol paths with the code-owned message `Source integrity check failed` and safe data `{code: "source_hash_mismatch", phase: "runtime", severity: "blocking"}`. It returns no `contents`, absolute path, or raw exception text; this denies that resource read without invalidating the immutable release catalogue.
 - Cancellation of an in-progress request follows the per-request revision on the `2026-07-28` path or the initialized session revision on the `2025-11-25` path. Retrieval stops promptly, releases temporary resources, records a non-response cancellation event, and does not publish a partial success or a second tool response.
 - Progress notifications are emitted only when the client supplied a progress token and the applicable per-request or session revision supports them.
 
@@ -1515,6 +1517,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - query token detection;
 - rank fusion;
 - context expansion rules;
+- exact clause lookup returning every chunk of a token-limit-split clause in canonical order without aggregating source IDs;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
@@ -1536,7 +1539,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - rejection of a lazy model with a changed, missing, extra, or pickle-backed weight artifact before loader invocation, routed as `release_integrity_failed` without a partial result, followed by release quarantine, non-zero process exit, and failed restart until rollback or repair;
 - CLI search;
 - MCP tool invocation;
-- MCP compatibility for `2026-07-28` and `2025-11-25`, including structured output, pagination, `-32602` versus `-32002` resource misses, `-32603` external-original integrity failures, no empty-content fallback, and no tool response after honored cancellation;
+- MCP compatibility for `2026-07-28` and `2025-11-25`, including structured output, pagination, `-32602` versus `-32002` resource misses, `-32603` external-original integrity failures with required `code`, `phase`, and `severity`, no empty-content fallback, and no tool response after honored cancellation;
 - indexed query plans for exact clause, jurisdiction, discipline, status, and document-type filters;
 - a target-edition catalogue change that invalidates cross-references and release assembly while an unrelated parse cache remains valid;
 - a standard document with an unresolved reference that ships only with an advisory and no target IDs, contrasted with a critical document whose same unresolved status blocks publication;
