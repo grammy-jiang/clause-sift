@@ -616,6 +616,8 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 
 Release validation enforces a total one-to-one mapping between chunks and sources: every chunk admitted to the release has exactly one source row, and every source row names that chunk's document. The unique key rejects duplicate mappings and the ownership foreign key rejects orphan or cross-document sources; an anti-join for chunks without a source is a blocking catalog invariant before index assembly or activation. The runtime opens only a catalog that passed this check.
 
+Release validation also enforces exact-lookup coverage. Every canonical clause node addressable by `(document_id, clause_number)` must have at least one covering chunk through `chunk_nodes`, and the union of those chunks' memberships must include every node in the clause subtree that has source-faithful text, table-cell content, or a source span. A recursive coverage query reports the clause and each uncovered node; any zero-chunk clause or uncovered retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality, this guarantees that an existing clause can always produce the non-empty, complete `get_clause` result required by Section 22.
+
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
 All runtime SQL, including FTS5 predicates, must use bound parameters. A dedicated query compiler escapes or rejects FTS5 operators according to the selected search mode; raw client text is never accepted as an FTS expression. Identifiers from MCP or CLI input are catalog keys, never SQL fragments or path components.
@@ -985,7 +987,7 @@ get_clause(
 )
 ```
 
-The lookup resolves one canonical clause node, then returns every persisted chunk required to cover that clause's canonical subtree. An unsplit clause produces one evidence item; a token-limit split produces one evidence item per chunk in ascending canonical chunk order. Each item retains its own `source_id`, page span, bounding boxes, and source-faithful `original_text`; the handler must not aggregate several chunks under one source ID or omit later parts of the clause.
+The lookup resolves one canonical clause node, then returns every distinct persisted chunk whose `chunk_nodes` membership is required to cover that clause's retrievable canonical subtree. It returns one evidence item only when one chunk provides the complete coverage; otherwise it returns one item per covering chunk in ascending canonical chunk order, regardless of whether the boundaries came from independently chunked subclauses, whole-table and row representations, semantic paragraphs, or a token-limit split. Each item retains its own `source_id`, page span, bounding boxes, and source-faithful `original_text`; the handler must not aggregate several chunks under one source ID or omit any covering chunk.
 
 #### `get_context`
 
@@ -1001,6 +1003,8 @@ get_context(
     include_references: bool = True,
 )
 ```
+
+The success object always contains all five context arrays: `parents`, `exceptions`, `notes`, `tables`, and `references`. A false include flag performs no traversal for that relation class and requires the corresponding array to be empty; a true flag may also produce an empty array when no matching relation exists. The strict output schema requires all five properties and does not vary its shape with the flags.
 
 #### `get_document_metadata`
 
@@ -1046,8 +1050,8 @@ The following semantic contract is normative; the JSON Schemas must encode it di
 | Tool | Selection semantics | Success result | Domain-error cases |
 | --- | --- | --- | --- |
 | `search_evidence` | Trimmed non-empty query; values are ORed within each supplied filter list and filter categories are ANDed; `status: null` removes the default active-status filter; `mode` resolves under Section 17. | `{query, retrieval_mode, release, evidence, warnings}` where `evidence` is an ordered array of Section 21 evidence items and `warnings` is an array of typed warning objects. | `identifier_invalid` for malformed filters; `feature_unavailable` for an explicit unsupported mode or bounded load failure; `release_integrity_failed` when a lazy model asset fails its pre-load integrity check. No matches is a success, not an error. |
-| `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. Resolve the canonical clause node and select all chunks covering its subtree. | `{release, evidence, warnings}` with a non-empty, canonically ordered array of Section 21 evidence items: one for an unsplit clause or one per persisted chunk for a split clause. Every item retains its own `source_id` and source span. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent. |
-| `get_context` | Exact `source_id`; each boolean independently includes that relation class, and false means omission rather than an empty synthetic item. | `{release, source_id, context, warnings}` where `context` has arrays `parents`, `exceptions`, `notes`, `tables`, and `references` for the requested classes, each containing catalog-bound evidence or relation records. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown source. |
+| `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. Resolve the canonical clause node and select every distinct persisted chunk needed to cover its retrievable subtree, independent of chunk-boundary cause. | `{release, evidence, warnings}` with a non-empty, canonically ordered array of Section 21 evidence items, one per covering chunk. Every item retains its own `source_id` and source span. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent. |
+| `get_context` | Exact `source_id`; each boolean independently controls traversal of that relation class. False performs no traversal and yields an empty array for the class. | `{release, source_id, context, warnings}` where `context` always has required arrays `parents`, `exceptions`, `notes`, `tables`, and `references`, each containing catalog-bound evidence or relation records when requested and found. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown source. |
 | `get_document_metadata` | Exact opaque `document_id`; no active-edition fallback. | `{release, document}` where `document` contains the safe manifest projection, source hash, review status, and release identity, but no absolute path. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown document. |
 | `list_documents` | Non-null filters are ANDed; each filter value is an exact normalized enum or discipline key; ordering and cursor rules are those stated above. | `{release, items, next_cursor}` where every item is the same safe document-metadata summary and `next_cursor` is string or null. | `identifier_invalid` for a malformed filter, limit, or cursor; `resource_not_found` for a cursor bound to another release. |
 | `get_page_reference` | Exact opaque `document_id` and one-based integer page number within the manifested source. | `{release, document_id, page_number, page_label, page_uri, content_hash}` where `page_uri` is an authorized `standards://page/...` resource URI, never a filesystem path. | `identifier_invalid` for malformed or out-of-range input; `resource_not_found` for an unknown document or unavailable page. |
@@ -1175,6 +1179,10 @@ manifest_content_hash
 parser_name
 parser_version
 parser_configuration
+parser_role_assignment
+parser_neutral_artifact_sha256
+comparison_gate_version
+comparison_gate_configuration
 ocr_configuration
 normalizer_version
 chunker_version
@@ -1192,7 +1200,7 @@ The list above is the dependency vocabulary, not one flat cache key. Each artifa
 
 | Cached artifact | Required cache-identity inputs |
 | --- | --- |
-| Canonical parse | Source-file hash; approved manifest-content hash; parser name, version, and configuration; OCR configuration; normalizer version; canonical schema version; dependency-lock hash; build-toolchain fingerprint. |
+| Canonical parse | Source-file hash; approved manifest-content hash; the ordered tuple `(role, adapter name, adapter version, adapter configuration, parser-neutral artifact SHA-256, OCR configuration)` for every selected route; comparison-gate implementation version and configuration when comparison is required; normalizer version; canonical schema version; dependency-lock hash; build-toolchain fingerprint. A critical document's identity therefore includes both `canonical_primary` and `independent_comparator` tuples in role order. |
 | Chunks | Canonical-tree artifact hash; chunker version and configuration; chunk schema version. |
 | Cross-references | Canonical-tree artifact hash; approved `reference_edition_overrides`; cross-reference resolver version and configuration; digest of the sorted target catalogue `(document_id, document_code, edition, canonical_node_tree_hash)`. |
 | Embeddings | Ordered embedding-text hashes from the chunk artifact; embedding model identifier and revision; local model-artifact SHA-256 or external-provider request parameters; embedding configuration; dependency-lock hash; build-toolchain fingerprint. |
@@ -1520,13 +1528,14 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - citation generation;
 - query token detection;
 - rank fusion;
-- context expansion rules;
-- exact clause lookup returning every chunk of a token-limit-split clause in canonical order without aggregating source IDs, plus rejection of duplicate source mappings and release-admitted chunks with no source;
+- context expansion rules, including required empty arrays for false include flags and true flags with no matching relation;
+- exact clause lookup returning every covering chunk in canonical order across independently chunked subclauses, whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs;
+- rejection of duplicate source mappings, release-admitted chunks with no source, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with incomplete `chunk_nodes` coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
 - tier-specific cross-reference severity and release-gate selection;
-- per-artifact cache-key dependency selection and target-catalogue invalidation;
+- per-artifact cache-key dependency selection, parser-role and comparison-configuration invalidation, and target-catalogue invalidation;
 - release checksum verification;
 - identifier and path-containment validation;
 - central response-field and diagnostic-detail allowlists, including path injection as an extra field and inside allowed structured and legacy string fields;
