@@ -1,0 +1,408 @@
+name: Documentation / design change
+description: Propose a documentation, architecture, specification, or design change with enough detail for an AI agent or maintainer to execute reliably.
+title: "[Docs]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Purpose
+
+        Use this form for documentation and design work, including architecture, data models, retrieval behavior, MCP/API contracts, evaluation design, contributor guidance, and other normative project documentation.
+
+        This issue must be **self-contained and implementation-ready at the documentation level**. A reader or AI agent should not need private conversation history to understand what is wrong, what should change, what must remain unchanged, and how completion will be judged.
+
+        **Quality rules for issue authors and AI agents:**
+
+        - Describe the current state before proposing a new state.
+        - Ground claims in repository files, existing behavior, or external references where applicable.
+        - Separate facts from assumptions, proposals, and open questions.
+        - State scope and non-goals explicitly to prevent scope creep.
+        - Preserve established ClauseSift design principles unless this issue explicitly proposes changing one.
+        - Use precise terminology and name the affected concepts, documents, sections, interfaces, or data structures.
+        - Make acceptance criteria objectively reviewable. Avoid vague criteria such as "update the docs" or "document this better".
+        - Do not silently bundle unrelated implementation work into a documentation issue. Identify follow-up implementation work separately.
+        - Do not rely on phrases such as "as discussed", "as above", or "from the previous conversation". Copy the necessary context into this issue.
+
+  - type: dropdown
+    id: change_type
+    attributes:
+      label: Documentation change type
+      description: Select the primary kind of documentation or design work proposed by this issue.
+      options:
+        - Architecture / system design
+        - Canonical data model / schema
+        - Retrieval / ranking / context behavior
+        - Build / ingestion / release pipeline
+        - Runtime behavior
+        - MCP / CLI / Python API contract
+        - Evaluation / quality requirements
+        - Security / safety / trust boundary
+        - User / operator documentation
+        - Contributor / development documentation
+        - Terminology / glossary / ontology
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: work_boundary
+    attributes:
+      label: Intended work boundary
+      description: Clarify whether this issue is expected to change documentation only or also define follow-up implementation work.
+      options:
+        - Documentation only
+        - Documentation now; implementation tracked separately
+        - Documentation plus implementation in the same issue
+        - Investigation / decision record only
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: State the proposed change and intended outcome in a concise, standalone form.
+      placeholder: |
+        In 3-6 sentences, explain:
+        - what should change;
+        - why the change is needed;
+        - what the resulting documentation or design should establish;
+        - what this issue intentionally does not attempt to solve, if that boundary is important.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Problem and motivation
+      description: Explain the concrete problem in the current documentation or design. Describe why it matters to ClauseSift.
+      placeholder: |
+        Include, where applicable:
+        - the ambiguity, inconsistency, missing concept, incorrect assumption, or operational problem;
+        - the user/developer/system impact;
+        - why the current design is insufficient;
+        - why this work should be done now rather than deferred;
+        - examples that demonstrate the problem.
+
+        Distinguish observed facts from hypotheses.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_state
+    attributes:
+      label: Current state and repository evidence
+      description: Describe what the repository currently says or does. Cite exact files, headings, concepts, interfaces, or relevant code where possible.
+      placeholder: |
+        Example structure:
+
+        Current documentation:
+        - `docs/design.md`, section "...": establishes ...
+        - `README.md`: currently describes ...
+
+        Current behavior/model:
+        - ...
+
+        Gaps or contradictions:
+        - ...
+
+        Do not describe the proposed state here. This section should make the baseline clear enough to review the delta.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: Proposed documentation / design change
+      description: Describe the target state in enough detail that an implementer can draft the documentation without guessing the intended architecture or semantics.
+      placeholder: |
+        Specify, as applicable:
+        - concepts or terminology to introduce, rename, remove, or clarify;
+        - architectural responsibilities and boundaries;
+        - data structures, node/relationship types, states, invariants, or lifecycle rules;
+        - expected diagrams or examples;
+        - API/MCP/CLI semantics;
+        - failure and warning behavior;
+        - normative requirements versus explanatory guidance;
+        - how the new material should relate to existing sections.
+
+        Prefer concrete statements such as "Define X as ..." or "Document that Y must ..." over broad statements such as "Improve the architecture section".
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope
+      description: List exactly what this issue is responsible for delivering.
+      placeholder: |
+        - Add or revise ...
+        - Define ...
+        - Reconcile ...
+        - Add examples/diagrams for ...
+        - Update cross-references in ...
+
+        Keep this list finite and reviewable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Non-goals / explicitly out of scope
+      description: State what must not be pulled into this issue, especially adjacent platform features or implementation work that could cause scope creep.
+      placeholder: |
+        Examples:
+        - No new runtime dependency.
+        - No migration to a graph database.
+        - No implementation of the documented behavior in this issue.
+        - No redesign of unrelated retrieval components.
+        - No change to public API compatibility.
+
+        Include project-specific exclusions rather than writing only "N/A" unless there truly are none.
+    validations:
+      required: true
+
+  - type: textarea
+    id: design_principles
+    attributes:
+      label: Impact on ClauseSift design principles
+      description: State how the proposal interacts with each established design principle. Explicitly call out any principle that would change.
+      placeholder: |
+        Address each item:
+
+        1. Accuracy before speed — unchanged / affected because ...
+        2. Original documents remain authoritative — unchanged / affected because ...
+        3. Offline compilation, read-only runtime — unchanged / affected because ...
+        4. Deterministic rules before LLM inference — unchanged / affected because ...
+        5. Immutable knowledge-base releases — unchanged / affected because ...
+        6. Replaceable components behind stable interfaces — unchanged / affected because ...
+        7. Fail visibly on uncertainty, conflict, or incomplete evidence — unchanged / affected because ...
+
+        If the issue intentionally changes a principle, explain why and identify the documentation that must record that architectural decision.
+    validations:
+      required: true
+
+  - type: textarea
+    id: semantics
+    attributes:
+      label: Semantics, invariants, and edge cases
+      description: Define the rules that must remain true after the documentation change. Include edge cases that could otherwise be interpreted differently by separate AI agents or implementations.
+      placeholder: |
+        Examples of useful detail:
+        - authoritative source versus derived representation;
+        - identity and versioning rules;
+        - allowed source/target types for relationships;
+        - directionality and cardinality;
+        - deterministic versus generated metadata;
+        - unresolved or low-confidence states;
+        - conflict behavior;
+        - backward-compatibility expectations;
+        - empty, missing, superseded, malformed, or ambiguous inputs.
+
+        If this issue has no new semantics, explain why the change is purely editorial.
+    validations:
+      required: true
+
+  - type: textarea
+    id: affected_docs
+    attributes:
+      label: Affected documentation and artifacts
+      description: Identify the files and sections expected to change, plus any derived artifacts that may need consistency updates.
+      placeholder: |
+        Expected edits:
+        - `docs/design.md` — sections ...
+        - `docs/...` — ...
+        - `README.md` — ...
+
+        Consistency checks:
+        - diagrams / Mermaid
+        - examples
+        - glossary / terminology
+        - MCP/API documentation
+        - evaluation documentation
+        - changelog or ADR, if applicable
+
+        If exact files are not yet known, explain how they will be identified.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Record meaningful alternatives and why they are not preferred. This prevents later agents from reopening settled choices without new evidence.
+      placeholder: |
+        For each serious alternative, state:
+        - alternative;
+        - benefits;
+        - drawbacks;
+        - reason for accepting or rejecting it.
+
+        Include "keep the current design" when that is a meaningful alternative.
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies, sequencing, and related work
+      description: List prerequisite issues, related issues/PRs, decisions that must land first, and work that should follow this issue.
+      placeholder: |
+        Prerequisites:
+        - #...
+
+        Related:
+        - #...
+
+        Follow-up:
+        - implementation issue for ...
+        - evaluation issue for ...
+
+        If there are no dependencies, state "None" and briefly explain why this issue can stand alone.
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation_implications
+    attributes:
+      label: Implementation implications
+      description: Explain whether the documentation change implies later code, schema, migration, test, packaging, or runtime work. Do not silently treat documentation as implementation.
+      placeholder: |
+        State one of the following with detail:
+        - No implementation change is implied; this is documentation-only because ...
+        - Implementation is expected later; likely affected areas are ...
+        - Implementation is included in this issue; the exact implementation scope is ...
+
+        Identify compatibility or migration concerns where applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and failure modes
+      description: Identify how this documentation/design change could create ambiguity, regress correctness, expand scope, or lead to incompatible implementations.
+      placeholder: |
+        Consider:
+        - accuracy or citation regressions;
+        - loss of determinism;
+        - hidden runtime complexity;
+        - new heavy dependencies;
+        - inconsistent terminology;
+        - backward compatibility;
+        - migration ambiguity;
+        - over-generalization beyond engineering evidence retrieval;
+        - AI agents interpreting the design differently.
+
+        For each material risk, describe the mitigation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: assumptions_questions
+    attributes:
+      label: Assumptions and open questions
+      description: Separate assumptions from unresolved decisions. An AI agent must not silently invent answers to material open questions.
+      placeholder: |
+        Assumptions:
+        - ...
+
+        Open questions requiring a decision:
+        - ...
+
+        Questions intentionally deferred:
+        - ...
+
+        If none remain, state why the proposal is sufficiently specified.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Define objective, reviewable completion criteria. Each item should describe an observable repository state, not an intention.
+      placeholder: |
+        Use checkboxes and make every criterion testable, for example:
+
+        - [ ] `docs/design.md` contains a normative definition of ...
+        - [ ] The relationship between X and Y is documented, including ...
+        - [ ] Scope and non-goals explicitly state ...
+        - [ ] At least one Mermaid diagram shows ...
+        - [ ] Examples cover normal and edge-case behavior for ...
+        - [ ] Existing contradictory terminology in ... is reconciled.
+        - [ ] All affected internal links and cross-references are updated.
+        - [ ] No acceptance criterion depends on undocumented conversation context.
+
+        Avoid criteria such as "documentation is clear" unless paired with concrete evidence for how clarity is assessed.
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_plan
+    attributes:
+      label: Validation and review plan
+      description: Explain how reviewers or agents will verify the documentation is internally consistent, technically correct, and repository-clean.
+      placeholder: |
+        Include relevant checks such as:
+        - compare the final text against the current design principles;
+        - verify terminology is consistent across affected documents;
+        - validate Mermaid syntax;
+        - run Markdown lint / pre-commit checks;
+        - verify links and section references;
+        - compare examples against the documented data model/API;
+        - review for accidental scope expansion;
+        - confirm implementation claims match the repository rather than assumptions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References and supporting evidence
+      description: Provide repository links, external specifications, prior issues/PRs, research, or reference implementations that materially support the proposal.
+      placeholder: |
+        Repository references:
+        - `docs/...`, section ...
+        - #...
+
+        External references:
+        - specification / project / paper: URL and the specific idea being referenced
+
+        Explain why each reference matters. Do not add a link without identifying the relevant concept or evidence.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## AI-agent / author quality gate
+
+        Before submitting, verify every item below. These checks are intentionally strict: the issue should be usable as a durable engineering artifact, not merely as a reminder or a transcript of a conversation.
+
+  - type: checkboxes
+    id: quality_gate
+    attributes:
+      label: Submission checklist
+      options:
+        - label: I checked the repository and existing issues/PRs for duplicate or already-settled work, and referenced related items where relevant.
+          required: true
+        - label: I inspected the current relevant documentation or code and described the actual current state rather than assuming it.
+          required: true
+        - label: This issue is self-contained and does not depend on private chat history, unstated context, or phrases such as "as discussed above".
+          required: true
+        - label: Facts, proposals, assumptions, and open questions are clearly distinguishable.
+          required: true
+        - label: Scope and non-goals are explicit enough to prevent an implementation agent from expanding the task into adjacent features.
+          required: true
+        - label: The proposal preserves ClauseSift's established design principles unless this issue explicitly justifies and documents a change to them.
+          required: true
+        - label: Acceptance criteria are objective and specific enough for another maintainer or AI agent to decide whether the issue is complete.
+          required: true
+        - label: Any implementation work implied by this documentation change is explicitly included, explicitly excluded, or identified as follow-up work.
+          required: true
+        - label: References are relevant and their significance is explained; unsupported external-project features are not presented as ClauseSift requirements.
+          required: true
+        - label: The issue does not introduce a new dependency, platform, database, framework, or architectural subsystem merely because a reference project uses one.
+          required: true
