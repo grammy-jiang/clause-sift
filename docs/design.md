@@ -1026,6 +1026,8 @@ get_context(
 
 The success object always contains all five context arrays: `parents`, `exceptions`, `notes`, `tables`, and `references`. A false include flag performs no traversal for that relation class and requires the corresponding array to be empty; a true flag may also produce an empty array when no matching relation exists. The strict output schema requires all five properties and does not vary its shape with the flags.
 
+The exact `source_id` identifies one chunk, not one arbitrary anchor node. For every enabled relation class, context expansion starts from every node in that chunk's `chunk_nodes`, in persisted `member_order`; it never selects only the first member. Each candidate records the originating member order, traversal depth, versioned relation-type rank, target document and node IDs, target node canonical order, and stable relation ID. That ID is the persisted relation ID when one exists and otherwise the deterministic hash of `(relation_class, source node ID, target node ID)` for a structural edge. Within an output array, the handler deduplicates by semantic identity `(relation_class, target_document_id, target_node_id, relation_type)`, retaining the candidate with the lexicographically smallest provenance tuple `(originating member_order, traversal_depth, relation-type rank, target document_id, target canonical_order, stable relation ID)`, then sorts the retained records by that tuple. Thus a parent or applicability relation reachable from several member nodes appears once, while context unique to any member cannot be omitted. Parent traversal follows the validated tree to its root; exceptions, notes, tables, and references use their declared direct catalog relations and do not recursively expand a referenced target.
+
 #### `get_document_metadata`
 
 Return the human-reviewed manifest and release identity for one cataloged document edition.
@@ -1063,13 +1065,26 @@ get_page_reference(
 
 Every tool declares a human-readable description, JSON Schema input and output contracts, and a read-only annotation. Every input-schema property has a non-empty description covering its identifier domain or units, normalization, default and null behavior, list-combination behavior where applicable, and bounds. Evidence-shaped successes are returned in `structuredContent` conforming to the output schema, with the same JSON serialized into a text content block for legacy clients. All output schemas use `additionalProperties: false`.
 
+All tool input schemas also use `additionalProperties: false` and the following shared, normative bounds. JSON Schema `maxLength` counts Unicode scalar values; after schema validation, the server also rejects any canonical UTF-8 serialization of `params.arguments` larger than 65,536 bytes before normalization, query planning, model loading, or catalog access. A bound violation is `identifier_invalid` on the sole runtime tool-input surface, never truncation or partial processing.
+
+| Input class | Bounds |
+| --- | --- |
+| Search query | Trimmed `minLength: 1`, `maxLength: 4096`; encoded query value at most 16,384 UTF-8 bytes. |
+| Opaque `document_id` or `source_id` | `minLength: 1`, `maxLength: 128`, pattern `^[a-z0-9][a-z0-9._:-]{0,127}$`. |
+| Clause number, document code, edition, jurisdiction, discipline, status, document type, or mode string | `minLength: 1`, `maxLength: 128`; enum fields remain closed enums. |
+| Cursor | `minLength: 1`, `maxLength: 2048`, plus authenticated-cursor syntax and release binding. |
+| Any filter array | `maxItems: 64` and `uniqueItems: true`; `search_evidence` accepts at most 256 total values across all filter arrays. |
+| Result limit | Integer in the inclusive range 1-100. |
+
+The same limits apply before and after the field's specified normalization: a client cannot use trimming, Unicode normalization, or duplicate removal to turn an over-limit input into an accepted one. Boundary-value tests cover the exact maximum and one-over values for every string/list class, aggregate bytes, and total filter values, and assert that the retrieval service and model loader are not invoked after rejection.
+
 Every handler returns an internal typed result to one central outbound serializer; that serializer constructs each public result from an explicit per-type field allowlist and fails closed on an unknown field. Diagnostics use code-owned message templates and per-code allowlists for detail keys and value types; raw exception strings, `repr` output, and arbitrary caller-supplied diagnostic messages are never serialized. The legacy text block is generated only from the already validated public object, not through a second formatting path. Raw source paths and internal workspace layout are not allowlisted and therefore cannot appear in either representation. Security regression tests inject an internal path as an extra field and inside otherwise allowed `message` and `details` values, and require both structured and legacy serialization to reject or safely redact it without emitting the sentinel.
 
 The following semantic contract is normative; the JSON Schemas must encode it directly rather than replacing it with unconstrained objects.
 
 | Tool | Selection semantics | Success result | Domain-error cases |
 | --- | --- | --- | --- |
-| `search_evidence` | Trimmed non-empty query; values are ORed within each supplied filter list and filter categories are ANDed; `status: null` removes the default active-status filter; `mode` resolves under Section 17. | `{query, retrieval_mode, release, evidence, warnings}` where `evidence` is an ordered array of Section 21 evidence items and `warnings` is an array of typed warning objects. | `identifier_invalid` for malformed filters; `feature_unavailable` for an explicit unsupported mode or bounded load failure; `release_integrity_failed` when a lazy model asset fails its pre-load integrity check. No matches is a success, not an error. |
+| `search_evidence` | Bounded trimmed query; values are ORed within each supplied bounded filter list and filter categories are ANDed; `status: null` removes the default active-status filter; `mode` resolves under Section 17. | `{query, retrieval_mode, release, evidence, warnings}` where `evidence` is an ordered array of Section 21 evidence items and `warnings` is an array of typed warning objects. | `identifier_invalid` for malformed or over-limit query, filters, or aggregate arguments; `feature_unavailable` for an explicit unsupported mode or bounded load failure; `release_integrity_failed` when a lazy model asset fails its pre-load integrity check. No matches is a success, not an error. |
 | `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. Resolve the canonical clause node and select every distinct persisted chunk needed to cover its retrievable subtree, independent of chunk-boundary cause. | `{release, evidence, warnings}` with a non-empty, canonically ordered array of Section 21 evidence items, one per covering chunk. Every item retains its own `source_id` and source span. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent. |
 | `get_context` | Exact `source_id`; each boolean independently controls traversal of that relation class. False performs no traversal and yields an empty array for the class. | `{release, source_id, context, warnings}` where `context` always has required arrays `parents`, `exceptions`, `notes`, `tables`, and `references`, each containing catalog-bound evidence or relation records when requested and found. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown source. |
 | `get_document_metadata` | Exact opaque `document_id`; no active-edition fallback. | `{release, document}` where `document` contains the safe manifest projection, source hash, review status, and release identity, but no absolute path. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown document. |
@@ -1557,7 +1572,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - citation generation;
 - query token detection;
 - rank fusion;
-- context expansion rules, including required empty arrays for false include flags and true flags with no matching relation;
+- context expansion rules, including required empty arrays for false include flags and true flags with no matching relation, plus a multi-node source chunk whose every member contributes context under deterministic semantic deduplication and ordering;
 - exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks;
 - rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, missing or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the chunk-derived projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases, including rejection of an existing but semantically wrong target node, code, edition, or document-root target;
@@ -1571,6 +1586,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - identifier and path-containment validation;
 - central response-field and diagnostic-detail allowlists, including path injection as an extra field and inside allowed structured and legacy string fields;
 - every Section 31 routing-table row and cancellation outcome;
+- exact-maximum and one-over query, identifier, cursor, filter-list, total-filter, and aggregate-argument bounds, with every rejection routed to `identifier_invalid` before retrieval or model loading;
 - human-grader reliability for ordinary label distributions, a unanimous single-category release sample that passes only through exact agreement plus a non-degenerate passing calibration set, and blocking degenerate-calibration or below-threshold cases;
 
 ### 34.2 Integration tests
