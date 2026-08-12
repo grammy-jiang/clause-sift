@@ -610,6 +610,8 @@ SQLite should store:
 
 SQLite is the source of truth for structured knowledge-base metadata.
 
+Every builder, validator, CLI, and MCP runtime SQLite connection executes `PRAGMA foreign_keys = ON` immediately after open and before starting a transaction, preparing a statement, creating schema, or reading/writing catalog data; the connection factory reads back `PRAGMA foreign_keys` and aborts unless it is `1`. Read-only runtime connections additionally enable and verify `PRAGMA query_only = ON`. Connection pooling may expose only connections initialized by this factory, and application queries cannot change either pragma. After the candidate catalog is fully materialized at step 13, the builder runs `PRAGMA foreign_key_check` and requires zero result rows before any derived builder runs; a disabled pragma or reported violation is a blocking `release_validation_failed`. The read-only runtime repeats `foreign_key_check` after opening the checksum-verified database and before starting the MCP session or serving a CLI/Python query; a disabled pragma or violation there follows the existing `release_integrity_failed` startup route. Neither condition is advisory.
+
 Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints must encode the canonical invariants rather than relying only on application code. The initial schema requires at least:
 
 `node_id`, `chunk_id`, `source_id`, and `cross_reference_id` are globally unique within a catalog release and remain stable across deterministic rebuilds of unchanged inputs. The apparently redundant unique pairs `(document_id, node_id)` and `(document_id, chunk_id)` are ownership candidate keys: dependent tables and self-relations reference those pairs so SQLite proves that an otherwise global node or chunk ID belongs to the accompanying document.
@@ -856,16 +858,15 @@ The build pipeline should detect deterministic references such as:
 - `except as permitted by Table 3.1`;
 - `in accordance with AS/NZS 1668.2`.
 
-Proposed fields:
+Persisted fields:
 
 ```text
 cross_reference_id
 source_node_id
 source_document_id
-source_edition
-target_document_code
-target_edition
-target_clause
+parsed_target_document_code
+parsed_target_edition
+parsed_target_clause
 target_document_id
 target_node_id
 relation_type
@@ -873,9 +874,9 @@ resolution_status
 raw_reference_text
 ```
 
-The persisted extraction fields are `parsed_target_document_code`, `parsed_target_edition`, and `parsed_target_clause`; each is null only when the reference grammar omits that component and otherwise contains its canonical normalized value. The similarly named `target_document_code`, `target_edition`, and `target_clause` values exposed to reports or runtime clients are derived by joining `target_document_id` to `documents` and `target_node_id` to `nodes`; callers and builders cannot write those projections independently.
+The parsed target fields are null only when the reference grammar omits that component and otherwise contain its canonical normalized value. `source_edition` and the `target_document_code`, `target_edition`, and `target_clause` values exposed to reports or runtime clients are derived by joining the stored source and target IDs to `documents` and `nodes`; callers and builders cannot write those projections independently.
 
-`source_document_id` and `source_edition` are always populated from the source node. A resolved reference must store the release-scoped `target_document_id`, `target_edition`, and `target_node_id`; document code plus clause text alone is not a stable join key. Resolution is deterministic:
+The base row stores `source_document_id` and `source_node_id`, with ownership enforced by their composite foreign key. A resolved reference stores only the release-scoped `target_document_id` and `target_node_id`; document code, edition, and clause projections alone are not stable join keys. Resolution is deterministic:
 
 1. a same-document reference uses the source `document_id`;
 2. an external reference naming a document code and edition requires exactly one catalogue match for that pair;
@@ -1169,7 +1170,7 @@ The intended build sequence is:
 10. Generate standards-aware chunks and their source rows.
 11. Extract and resolve cross-references.
 12. Generate lexical and embedding text.
-13. Materialize the candidate SQLite catalog and run every Section 14.1 constraint and blocking validation query, including chunk/source totality, source-text and page-span reconstruction, exact-key uniqueness, clause coverage, and cross-reference integrity.
+13. Materialize the candidate SQLite catalog through a connection that verified foreign-key enforcement, require zero rows from `PRAGMA foreign_key_check`, and run every Section 14.1 blocking validation query, including chunk/source totality, source-text and page-span reconstruction, exact-key uniqueness, clause coverage, and cross-reference integrity.
 14. Generate document embeddings only after the catalog gate passes.
 15. Build lexical indexes.
 16. Build vector artifacts.
@@ -1561,6 +1562,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, missing or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the chunk-derived projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases, including rejection of an existing but semantically wrong target node, code, edition, or document-root target;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
+- connection-factory enforcement and readback of `PRAGMA foreign_keys = ON`, runtime `query_only`, zero-row builder/runtime `foreign_key_check`, and rejection of a deliberately injected ownership violation created through an external enforcement-disabled fixture connection;
 - one-root node-tree reachability and acyclicity, parent-before-child ordering, reciprocal immediate previous/next links, and rejection of self-parent, multi-node parent-cycle, disconnected-node, and cyclic chunk-parent fixtures;
 - target-node/document consistency and every `resolution_status` constraint;
 - tier-specific cross-reference severity and release-gate selection;
