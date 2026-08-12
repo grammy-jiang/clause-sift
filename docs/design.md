@@ -610,10 +610,11 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 
 | Table | Required constraints |
 | --- | --- |
-| `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_content_hash`, and `source_file_hash` `NOT NULL`; unique `(document_code, edition)`. |
+| `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_content_hash`, `source_file_hash`, and positive `source_page_count` `NOT NULL`; unique `(document_code, edition)`. |
 | `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `clause_number` is either null or a normalized non-empty exact-lookup key, with a unique partial key `(document_id, clause_number) WHERE clause_number IS NOT NULL`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for roots or sequence boundaries; each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
 | `chunks` | Globally unique `chunk_id` primary key; `document_id`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
 | `chunk_nodes` | `document_id`, `chunk_id`, `node_id`, `member_order`, `node_text_start`, and `node_text_end` `NOT NULL`; composite primary key `(chunk_id, node_id)` and unique `(chunk_id, member_order)`; checks require zero-based `member_order`, `node_text_start >= 0`, and `node_text_end > node_text_start`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
+| `node_page_spans` | `document_id`, `node_id`, half-open UTF-8 byte `node_text_start`, `node_text_end`, `page_number`, and `mapping_order` `NOT NULL`; primary key `(node_id, node_text_start, node_text_end, page_number)` and unique `(node_id, mapping_order)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`; checks require valid non-empty byte spans, non-negative mapping order, positive pages, and schema-valid optional bounding boxes. |
 | `document_jurisdictions` and `document_disciplines` | Both columns `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
 | `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; unique `(document_id, chunk_id)`; page span check enforces positive ordered pages. |
 | `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, and resolution status `NOT NULL`; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. `source_edition` and resolved `target_edition` are derived from the joined document records rather than independently writable values. |
@@ -621,6 +622,8 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 Release validation enforces a total one-to-one mapping between chunks and sources: every chunk admitted to the release has exactly one source row, and every source row names that chunk's document. The unique key rejects duplicate mappings and the ownership foreign key rejects orphan or cross-document sources; an anti-join for chunks without a source is a blocking catalog invariant before index assembly or activation. The runtime opens only a catalog that passed this check.
 
 Release validation reconstructs each chunk's `original_text` by sorting its `chunk_nodes` rows by the gap-free `member_order`, checking that every half-open byte span is within the referenced non-null `nodes.original_text` and starts and ends on UTF-8 code-point boundaries, extracting those spans, and joining them with the versioned projection separator. Null or empty chunk text, an invalid membership span, missing or duplicate order positions, and any byte mismatch between the reconstruction and stored `chunks.original_text` block index assembly and activation.
+
+Release validation also derives source provenance rather than trusting stored page numbers. Every byte in each `chunk_nodes` member span must be covered without a gap by that node's gap-free ordered `node_page_spans`; every mapping page must be within `1..documents.source_page_count`. For each chunk, the validator computes the minimum and maximum intersecting page numbers and requires its sole `sources` row to store exactly those values. Evidence bounding boxes are projected only from the intersecting mappings, in page and mapping order, and must lie on pages within that derived span. A missing mapping, an out-of-range page or box, or any stored-versus-derived source span mismatch blocks index assembly and activation.
 
 Release validation also enforces exact-key determinism and coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. Every addressable node must have at least one covering chunk through `chunk_nodes`, and the union of those chunks' memberships must include every node in the clause subtree that has source-faithful text, table-cell content, or a source span. A recursive coverage query reports the clause and each uncovered node; any duplicate normalized key, zero-chunk clause, or uncovered retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
 
@@ -1152,24 +1155,25 @@ The intended build sequence is:
 6. Produce parser-neutral artifacts for every selected route.
 7. Run each adapter's parsing validation and every required dual-parser comparison gate; only after all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents deterministically from it.
 8. Construct clause and node trees.
-9. Generate standards-aware chunks.
-10. Extract and resolve cross-references.
-11. Generate lexical and embedding text.
-12. Generate document embeddings.
-13. Build lexical indexes.
-14. Build vector artifacts.
-15. Build page and bounding-box mappings.
-16. Generate static review reports.
-17. Run regression evaluation and enforce the documented quality gates.
-18. Confirm that no release-blocking parser, security, integrity, or document-review finding remains open.
-19. Assemble a candidate release.
-20. Validate the release manifest and every required artifact checksum.
-21. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
-22. Publish the release and atomically update the active pointer.
+9. Build node-level page and bounding-box mappings and validate their page counts against the source.
+10. Generate standards-aware chunks and their source rows.
+11. Extract and resolve cross-references.
+12. Generate lexical and embedding text.
+13. Materialize the candidate SQLite catalog and run every Section 14.1 constraint and blocking validation query, including chunk/source totality, source-text and page-span reconstruction, exact-key uniqueness, clause coverage, and cross-reference integrity.
+14. Generate document embeddings only after the catalog gate passes.
+15. Build lexical indexes.
+16. Build vector artifacts.
+17. Generate static review reports.
+18. Run regression evaluation and enforce the documented quality gates.
+19. Confirm that no release-blocking parser, catalog, security, integrity, or document-review finding remains open.
+20. Assemble a candidate release.
+21. Validate the release manifest and every required artifact checksum.
+22. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
+23. Publish the release and atomically update the active pointer.
 
 A failed build must leave the active release unchanged.
 
-The publish step is unreachable unless every preceding gate succeeds. Tests must inject failures before and during candidate validation and prove that neither the active pointer nor the previous release changes.
+The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Tests must inject failures at the catalog gate and before and during candidate validation, proving that downstream builders were not called and that neither the active pointer nor the previous release changes.
 
 ---
 
@@ -1536,7 +1540,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - rank fusion;
 - context expansion rules, including required empty arrays for false include flags and true flags with no matching relation;
 - exact clause lookup returning every covering chunk in canonical order across independently chunked subclauses, whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs;
-- rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with incomplete `chunk_nodes` coverage;
+- rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, missing or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the chunk-derived projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with incomplete `chunk_nodes` coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
@@ -1552,6 +1556,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - parser adapter to canonical model;
 - mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that construct or cache no canonical artifact and leave the active release unchanged, and a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
+- a deliberately invalid catalog that fails at step 13 and invokes or caches no embedding, lexical-index, or vector-index builder while leaving the active release unchanged;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
 - rejection of pickled/object NumPy arrays and mismatched dtype, shape, size, or checksum;
