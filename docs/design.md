@@ -205,19 +205,25 @@ flowchart TB
     subgraph Build[Offline build environment]
         A[Source documents] --> B[Document registration]
         B --> C[Parser router]
-        C --> D[Canonical document model]
-        D --> E[Standards-aware chunker]
-        E --> F[Lexical index builder]
-        E --> G[Embedding builder]
-        G --> H[Vector index builder]
+        C --> PN[Parser-neutral artifacts]
+        PN --> PV[Parser validation and comparison gate]
+        PV --> D[Canonical document model]
         D --> I[Cross-reference resolver]
         D --> J[Page and bounding-box mapper]
-        F --> K[Release assembler]
-        H --> K
-        I --> K
-        J --> K
-        K --> L[Validation and regression tests]
-        L --> M[Immutable KB release]
+        D --> E[Standards-aware chunker]
+        J --> E
+        E --> CG[Catalog validation gate]
+        I --> CG
+        CG --> F[Lexical index builder]
+        CG --> G[Embedding builder]
+        G --> H[Vector index builder]
+        F --> EV[Regression evaluation, reports, and quality gates]
+        H --> EV
+        CG --> EV
+        EV --> K[Candidate release assembler]
+        K --> L[Checksum and read-only smoke validation]
+        L --> AP[Atomic active-pointer switch]
+        AP --> M[Immutable active KB release]
     end
 
     subgraph Runtime[Read-only runtime]
@@ -384,9 +390,9 @@ source_file: corpus/originals/AS1668.1-2015.pdf
 sha256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-Registration computes `manifest_bytes_hash` over the exact manifest file bytes before decoding, then loads the YAML with a safe loader that rejects custom tags and validates it against a versioned schema with unknown fields rejected. It separately computes `manifest_content_hash` over the schema-normalized canonical representation. SHA-256 values use the canonical string form `sha256:` followed by exactly 64 lowercase hexadecimal characters; bare digests, uppercase characters, and surrounding whitespace are invalid. The non-zero value above is illustrative and registration must replace it with the digest calculated from the selected source bytes before human approval. `sha256` is mandatory and non-null for any manifest admitted to a build.
+Registration computes a raw `manifest_bytes_hash` for provenance before decoding, then loads the YAML with a safe loader that rejects custom tags and validates it against a versioned schema with unknown fields rejected. It separately computes `manifest_content_hash` over the schema-normalized canonical representation. SHA-256 values use the canonical string form `sha256:` followed by exactly 64 lowercase hexadecimal characters; bare digests, uppercase characters, and surrounding whitespace are invalid. The non-zero value above is illustrative and registration must replace it with the digest calculated from the selected source bytes before human approval. `sha256` is mandatory and non-null for any manifest admitted to a build. Registration also records the selected source's positive byte size.
 
-The immutable approval record stores both manifest hashes. Before ingestion, the builder recomputes the raw-byte hash and requires exact equality with the approved `manifest_bytes_hash`, then safe-loads and canonicalizes the manifest and requires equality with the approved `manifest_content_hash`. Any byte change, including comments, whitespace, encoding, or key order that preserves canonical content, invalidates the approval and requires human re-review; changing either approved hash invalidates the affected build and release-assembly cache entries.
+The immutable approval binds the schema-normalized `manifest_content_hash` and selected source hash. Before ingestion, the builder safe-loads and canonicalizes the current manifest and requires exact equality with the approved content hash, then verifies the source hash and size. A semantic manifest or source change invalidates approval and affected caches. A raw-byte-only change—such as comments, whitespace, encoding, or key order that leaves canonical content unchanged—does not require human reapproval or invalidate semantic artifacts; the builder records the current `manifest_bytes_hash` and the change only in the external operator lifecycle ledger for forensic provenance. Raw manifest bytes and their hash are not release or runtime catalog authority.
 
 `release_tier` is either `critical` or `standard`. A critical document is one whose omission or structurally incorrect parsing can invalidate a release; it is subject to the dual-parser and release-blocking rules in Section 11.3.
 
@@ -424,7 +430,7 @@ Initial candidate paths:
 
 No parser selection becomes permanent until it is measured against the project evaluation corpus.
 
-Source documents and parser outputs are untrusted. Parser adapters should run in isolated subprocesses with no network access, a dedicated temporary directory, explicit CPU, memory, wall-time, file-size, and page-count limits, and read-only access only to the selected source file plus the pinned parser executable, runtime libraries, and declared local model assets required for that adapter. They receive no read access to the remaining corpus, workspace, credentials, or operator state. The builder validates the adapter's parser-neutral output before importing it; a timeout, limit violation, crash, or malformed output fails that document rather than weakening isolation.
+Source documents and parser outputs are untrusted. Parser adapters must run in isolated subprocesses with no network access, a dedicated temporary directory, explicit CPU, memory, wall-time, file-size, and page-count limits, and read-only access only to the selected source file plus the pinned parser executable, runtime libraries, and declared local model assets required for that adapter. They receive no read access to the remaining corpus, workspace, credentials, or operator state. Failure to establish or verify any isolation control is a blocking `parser_failed`; the builder never falls back to an unisolated execution. The builder validates the adapter's parser-neutral output before importing it; a timeout, limit violation, crash, or malformed output fails that document rather than weakening isolation.
 
 ### 11.2 Parser contract
 
@@ -460,7 +466,7 @@ The builder must test:
 
 Comparison mode is mandatory for every `critical` document and optional for a `standard` document. The enabled state is part of the versioned, approved parser-routing configuration and cache identity; changing it requires review before rebuilding, so a failed standard comparison cannot be bypassed by silently disabling the mode. Whenever comparison mode is enabled, the document must be parsed independently by two configured adapters backed by distinct parser implementations; running one implementation twice or changing only its options does not satisfy this rule. Neither adapter's output becomes canonical until the comparison gate passes. Enabling comparison mode is therefore a gating build-policy choice, not an advisory shadow run.
 
-For every comparison-mode document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds the configuration selected for that document's release tier. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which is outside canonical and downstream artifact caches and remains available after failure. A blocked document may proceed only after correcting the parser, source, manifest, or comparison-mode routing configuration and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
+For every comparison-mode document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds the configuration selected for that document's release tier. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which remains available after failure and is never itself canonical authority. A passing report is additionally promoted byte-for-byte into the content-addressed parser-validation cache and its hash becomes a canonical-model input; a failed report is retained only as a diagnostic and never enters canonical or downstream artifact caches. A blocked document may proceed only after correcting the parser, source, manifest, or comparison-mode routing configuration and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
 
 The versioned parser-routing configuration must name exactly one `canonical_primary` for every document. It additionally names exactly one ordered `independent_comparator` for every comparison-mode document, either directly or through a deterministic rule over manifested fields; a standard document outside comparison mode has only the primary route. Every selected adapter's identity, version, configuration, and assigned role is a build input. After the primary's single-parser gate and, when applicable, the comparator's single-parser gate and comparison gate pass, the builder selects the `canonical_primary` parser-neutral artifact byte-for-byte as the sole input to deterministic canonical-model construction; the comparator is validation-only. Below-threshold wording or OCR differences therefore resolve to the primary output, never to field-by-field merging, majority selection, or build-order choice. Changing an adapter or role invalidates the parse and all downstream cache entries and requires a complete rebuild and review. With unchanged source bytes, ordered roles, adapters, and configurations, both the selected parser artifact and resulting canonical model must be byte-identical across rebuilds.
 
@@ -484,9 +490,6 @@ next_node_id
 heading
 heading_path
 clause_number
-page_start
-page_end
-bounding_boxes
 original_text
 normalized_text
 parser_source
@@ -494,7 +497,7 @@ parser_confidence
 attributes
 ```
 
-A non-null `clause_number` declares that the node is independently addressable by exact clause lookup. It must contain the canonical normalized, non-empty identifier for that document; descendants that are not independently addressable keep it null rather than copying an ancestor's number for display. The catalog constraints in Section 14.1 make every non-null `(document_id, clause_number)` unique, so exact lookup cannot select between two canonical subtrees.
+A non-null `clause_number` declares that the node is independently addressable by exact clause lookup. It must contain the canonical normalized, non-empty identifier for that document; descendants that are not independently addressable keep it null rather than copying an ancestor's number for display. The catalog constraints in Section 14.1 make every non-null `(document_id, clause_number)` unique, so exact lookup cannot select between two canonical subtrees. Page bounds and bounding boxes are logical read-only projections of the authoritative ordered `node_page_spans` rows in Section 14.1, not independently writable node columns.
 
 ### 12.2 Initial node types
 
@@ -549,13 +552,9 @@ Fixed-size character chunking is not the primary strategy.
 chunk_id
 document_id
 node_ids
+citation_node_id
 chunk_kind
 canonical_order
-clause_number
-heading_path
-node_type
-page_start
-page_end
 parent_chunk_id
 previous_chunk_id
 next_chunk_id
@@ -564,7 +563,9 @@ search_text
 embedding_text
 ```
 
-`document_id` is the immutable identity of one manifested edition. `edition` remains the human-readable version label in the document record; chunks do not introduce a second `document_version` concept.
+`document_id` is the immutable identity of one manifested edition. `edition` remains the human-readable version label in the document record; chunks do not introduce a second `document_version` concept. The list above is logical: ordered `node_ids` are persisted through `chunk_nodes`. Clause number, heading path, node type, and page bounds are not independently writable scalar chunk fields. The builder derives `citation_node_id` as the deepest common ancestor of every member node in the validated canonical tree; release validation recomputes it. Heading path and node type project from that anchor, while page bounds and boxes project from the sole source row and intersecting page-span mappings.
+
+For each retrievable member, the builder computes its nearest ancestor-or-self with a non-null `clause_number`, or null when none exists; every value in one chunk must be identical. A shared non-null node supplies the evidence `clause`, while an all-null chunk emits `clause: null`. A candidate mixing addressed and unaddressed content or spanning two independently addressable branches is split before persistence, so a scalar clause and generated citation are never ambiguous even when `citation_node_id` itself is a non-addressable paragraph or structural ancestor.
 
 Every persisted chunk has non-empty source-faithful `original_text`. Chunk membership records the ordered, half-open UTF-8 byte span contributed by each member node; offsets must fall on code-point boundaries. Full-node membership uses the entire encoded `nodes.original_text`. The versioned chunk projection joins those spans with its declared source-faithful separator, while hierarchy and retrieval enrichment appear only in `search_text` or `embedding_text`.
 
@@ -607,10 +608,11 @@ SQLite should store:
 - cross-references;
 - build metadata;
 - parser warnings;
-- release metadata;
-- evaluation results.
+- release-admission metadata known at the catalog gate.
 
 SQLite is the source of truth for structured knowledge-base metadata.
+
+The current run's evaluation results are not written back into `knowledge.sqlite`: the candidate catalog is fully materialized and becomes byte-stable at step 13, before evaluation runs. Step 17 writes the authoritative, versioned `evaluation-results.json`; the static report and release manifest refer to that artifact by hash and carry only its derived summary. Post-gate evaluation, candidate-validation, activation, and rollback records likewise live outside the immutable catalog. No later build step reopens `knowledge.sqlite` for mutation.
 
 Every builder, validator, CLI, and MCP runtime SQLite connection executes `PRAGMA foreign_keys = ON` immediately after open and before starting a transaction, preparing a statement, creating schema, or reading/writing catalog data; the connection factory reads back `PRAGMA foreign_keys` and aborts unless it is `1`. Read-only runtime connections additionally enable and verify `PRAGMA query_only = ON`. Connection pooling may expose only connections initialized by this factory, and application queries cannot change either pragma. After the candidate catalog is fully materialized at step 13, the builder runs `PRAGMA foreign_key_check` and requires zero result rows before any derived builder runs; a disabled pragma or reported violation is a blocking `release_validation_failed`. The read-only runtime repeats `foreign_key_check` after opening the checksum-verified database and before starting the MCP session or serving a CLI/Python query; a disabled pragma or violation there follows the existing `release_integrity_failed` startup route. Neither condition is advisory.
 
@@ -620,11 +622,11 @@ Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints m
 
 | Table | Required constraints |
 | --- | --- |
-| `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_bytes_hash`, `manifest_content_hash`, `source_file_hash`, and positive `source_page_count` `NOT NULL`; unique `(document_code, edition)`. |
+| `documents` | `document_id` primary key; `document_code`, `edition`, `document_type`, `release_tier`, `status`, normalized relative `source_file`, positive `source_file_size`, `manifest_content_hash`, `source_file_hash`, and positive `source_page_count` `NOT NULL`; unique `(document_code, edition)`; checks reject an absolute/empty source locator and `.` or `..` segments, and enforce the Section 10.4 document-type enum, `release_tier IN ('critical', 'standard')`, and `status IN ('active', 'superseded', 'withdrawn')`. The runtime resolves the locator beneath the configured originals root and applies the containment and link checks in Section 22.1. |
 | `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `clause_number` is either null or a normalized non-empty exact-lookup key, with a unique partial key `(document_id, clause_number) WHERE clause_number IS NOT NULL`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for the sole document root or sequence boundaries, may not equal `node_id`, and each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
-| `chunks` | Globally unique `chunk_id` primary key; `document_id`, closed-enum `chunk_kind`, dense zero-based `canonical_order`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)` and unique `(document_id, canonical_order)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
+| `chunks` | Globally unique `chunk_id` primary key; `document_id`, `citation_node_id`, closed-enum `chunk_kind`, dense zero-based `canonical_order`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`, unique `(document_id, canonical_order)`, and composite foreign key `(document_id, citation_node_id)` to `nodes(document_id, node_id)`. Validation requires the citation node to equal the deepest common ancestor of all member nodes and the nearest addressable-ancestor-or-null value to be identical for every retrievable member. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
 | `chunk_nodes` | `document_id`, `chunk_id`, `node_id`, `member_order`, `node_text_start`, and `node_text_end` `NOT NULL`; composite primary key `(chunk_id, node_id)` and unique `(chunk_id, member_order)`; checks require zero-based `member_order`, `node_text_start >= 0`, and `node_text_end > node_text_start`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
-| `node_page_spans` | `document_id`, `node_id`, half-open UTF-8 byte `node_text_start`, `node_text_end`, `page_number`, and `mapping_order` `NOT NULL`; primary key `(node_id, node_text_start, node_text_end, page_number)` and unique `(node_id, mapping_order)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`; checks require valid non-empty byte spans, non-negative mapping order, positive pages, and schema-valid optional bounding boxes. |
+| `node_page_spans` | `document_id`, `node_id`, half-open UTF-8 byte `node_text_start`, `node_text_end`, `page_number`, and `mapping_order` `NOT NULL`; primary key `(node_id, node_text_start, node_text_end, page_number)` and unique `(node_id, mapping_order)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`; checks require valid non-empty byte spans, non-negative mapping order, positive pages, and schema-valid optional bounding boxes. Release validation requires every non-empty node's rows, in dense `mapping_order`, to form an exact non-overlapping partition of `[0, byte_length(nodes.original_text))`; adjacent rows meet at one boundary, while any overlap, duplicate coverage, gap, or out-of-order interval blocks release. An empty-text structural node has no span row. |
 | `document_jurisdictions` and `document_disciplines` | Both columns `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
 | `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; unique `(document_id, chunk_id)`; page span check enforces positive ordered pages. |
 | `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, normalized parsed target fields, and resolution status `NOT NULL` where the reference grammar supplies them; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. Source and resolved-target document code, edition, and clause are read-only join projections rather than independently writable base columns. |
@@ -635,9 +637,9 @@ Release validation enforces a total one-to-one mapping between chunks and source
 
 Release validation reconstructs each chunk's `original_text` by sorting its `chunk_nodes` rows by the gap-free `member_order`, checking that every half-open byte span is within the referenced non-null `nodes.original_text` and starts and ends on UTF-8 code-point boundaries, extracting those spans, and joining them with the versioned projection separator. Null or empty chunk text, an invalid membership span, missing or duplicate order positions, and any byte mismatch between the reconstruction and stored `chunks.original_text` block index assembly and activation.
 
-Release validation also derives source provenance rather than trusting stored page numbers. Every byte in each `chunk_nodes` member span must be covered without a gap by that node's gap-free ordered `node_page_spans`; every mapping page must be within `1..documents.source_page_count`. For each chunk, the validator computes the minimum and maximum intersecting page numbers and requires its sole `sources` row to store exactly those values. Evidence bounding boxes are projected only from the intersecting mappings, in page and mapping order, and must lie on pages within that derived span. A missing mapping, an out-of-range page or box, or any stored-versus-derived source span mismatch blocks index assembly and activation.
+Release validation also derives source provenance rather than trusting stored page numbers. It recomputes each non-empty node's exact non-overlapping page-span partition before using it; every mapping page must be within `1..documents.source_page_count`. For each chunk, the validator computes the minimum and maximum mappings intersecting its `chunk_nodes` member spans and requires its sole `sources` row to store exactly those page values. Evidence bounding boxes are projected only from those intersecting mappings, in page and mapping order, and must lie on pages within that derived span. A missing, overlapping, duplicate, gapped, or out-of-order mapping; an out-of-range page or box; or any stored-versus-derived source span mismatch blocks index assembly and activation.
 
-Release validation also enforces exact-key determinism and byte-complete subtree coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. For this check, a retrievable node has non-empty source-faithful `original_text`, including any serialized table-cell text; an empty page-only structural anchor is contextual rather than a retrievable chunk member. For each addressable clause, its covering set is every distinct chunk with a `chunk_nodes` membership on a retrievable node in that clause's subtree, and the set must be non-empty. For every retrievable subtree node, the validator sorts and merges all member intervals contributed by that covering set and requires their union to equal exactly the full half-open UTF-8 byte interval `[0, byte_length(nodes.original_text))`; overlaps from whole-table and row representations are allowed, but a missing prefix, interior gap, or missing suffix blocks release. An addressable structural root whose own `original_text` is empty needs no zero-length direct membership, even if it carries a contextual page mapping: byte-complete descendant coverage satisfies the clause. An addressable subtree with no retrievable self or descendant content remains invalid. A recursive coverage query reports the clause, node, and every uncovered byte interval; any duplicate normalized key, empty covering set, contentless addressable subtree, or byte-incomplete retrievable descendant is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
+Release validation also enforces exact-key determinism and byte-complete subtree coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. For this check, a retrievable node has non-empty source-faithful `original_text`, including any serialized table-cell text; an empty structural anchor is contextual rather than a retrievable chunk member and derives any displayed page context from covered descendants rather than owning a zero-length page-span row. For each addressable clause, its covering set is every distinct chunk that has at least one membership in that clause's retrievable subtree and whose every retrievable member belongs to that subtree; a chunk that also contains text from outside the requested subtree cannot satisfy or appear in exact lookup for that clause. The covering set must be non-empty. For every retrievable subtree node, the validator sorts and merges all member intervals contributed by that covering set and requires their union to equal exactly the full half-open UTF-8 byte interval `[0, byte_length(nodes.original_text))`; overlaps from whole-table and row representations are allowed, but a missing prefix, interior gap, or missing suffix blocks release. An addressable structural root whose own `original_text` is empty needs no zero-length direct membership; byte-complete descendant coverage satisfies the clause and supplies its contextual page range. An addressable subtree with no retrievable self or descendant content remains invalid. A recursive coverage query reports the clause, node, every uncovered byte interval, and every otherwise selected chunk with an out-of-subtree member; any duplicate normalized key, empty covering set, contentless addressable subtree, byte-incomplete retrievable descendant, or exact-lookup chunk leaking outside the subtree is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
 
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
@@ -922,7 +924,7 @@ Example:
 {
   "query": "When may mechanical smoke exhaust be omitted?",
   "retrieval_mode": "high_accuracy",
-  "release": "2026.08",
+  "release": "rel-sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   "evidence": [
     {
       "source_id": "src-001",
@@ -973,6 +975,8 @@ Every warning is an object with a Section 31 `code`, `phase`, `severity`, a huma
 ## 22. MCP interface
 
 The first runtime uses the official Python MCP SDK and local `stdio` transport. ClauseSift v0.1 targets MCP revision `2026-07-28` through the SDK's dual-era server support and must also pass compatibility tests with `2025-11-25` clients. The exact SDK version is pinned and recorded in `build-info.json`; upgrading either protocol behavior or the SDK requires conformance and client-compatibility tests.
+
+On the `2026-07-28` wire path, every non-JSON-RPC-error result carries `resultType: "complete"`. `tools/list`, `resources/list`, `resources/templates/list`, and `resources/read` additionally carry `ttlMs: 0` and `cacheScope: "private"`: the process-lifetime catalogue is stable, but local document metadata and content are not declared shareable across callers, and immediate staleness is the conservative v0.1 policy. The `2025-11-25` path omits all three revision-owned fields. Raw-frame conformance tests verify their required presence, exact values, and legacy absence even when the SDK supplies them below application code.
 
 The v0.1 server advertises only the tools and resources it implements. Its tool and resource lists are stable for the lifetime of the process, so it does not advertise list-change notifications or resource subscriptions. A release-pointer change becomes visible after a server restart, not through an in-session mutable resource catalogue.
 
@@ -1052,7 +1056,7 @@ list_documents(
 )
 ```
 
-The input schema constrains `limit` to 1-100. The result contains `items` and `next_cursor`; `next_cursor` is null on the final page. Cursors are opaque, release-bound, and rejected after a release change.
+The input schema constrains `limit` to 1-100. The result contains `items` and `next_cursor`; `next_cursor` is null on the final page. A cursor is an opaque authenticated encoding of `{release_id, cursor_version, order_version, normalized_filters, last_key}`, where `normalized_filters` contains the exact canonical `document_type`, `status`, and `discipline` values (including nulls) and `last_key` is the last emitted `(document_code, edition, document_id)` tuple. Resumption uses a strict lexicographic keyset predicate, never an offset. Invalid authentication, unsupported cursor/order versions, or any filter mismatch is `identifier_invalid`; a valid cursor naming another release is `resource_not_found`. Tests cover tampering, filter mutation, release change, duplicate code/edition prefixes distinguished by `document_id`, empty and final pages, and no duplicates or gaps within one immutable release.
 
 #### `get_page_reference`
 
@@ -1065,9 +1069,11 @@ get_page_reference(
 )
 ```
 
-Every tool declares a human-readable description, JSON Schema input and output contracts, and a read-only annotation. Every input-schema property has a non-empty description covering its identifier domain or units, normalization, default and null behavior, list-combination behavior where applicable, and bounds. Evidence-shaped successes are returned in `structuredContent` conforming to the output schema, with the same JSON serialized into a text content block for legacy clients. All output schemas use `additionalProperties: false`.
+Every tool declares a human-readable description, JSON Schema input and output contracts, and a read-only annotation. Every input-schema property has a non-empty description covering its identifier domain or units, normalization, default and null behavior, list-combination behavior where applicable, and bounds. Each advertised output schema describes that tool's success object only and uses `additionalProperties: false`. A success returns that object in `structuredContent`, conforming to the advertised output schema, with the same JSON serialized into one text content block for legacy clients.
 
-All tool input schemas also use `additionalProperties: false` and the following shared, normative bounds. JSON Schema `maxLength` counts Unicode scalar values; after schema validation, the server also rejects any canonical UTF-8 serialization of `params.arguments` larger than 65,536 bytes before normalization, query planning, model loading, or catalog access. A bound violation is `identifier_invalid` on the sole runtime tool-input surface, never truncation or partial processing.
+Tool execution errors use the other MCP result branch: they set `isError: true`, omit `structuredContent`, and place exactly one JSON serialization of the strict shared error object `{code, phase, severity, message, details?}` in a text content block. The central serializer validates this object against a separate internal error schema with `additionalProperties: false` and per-code `details` allowlists before emitting it. Because an error has no `structuredContent`, it cannot violate or masquerade as the advertised success output schema. Dual-era conformance tests require every tool's success to validate against its advertised schema and every routed tool error to have `isError: true`, absent `structuredContent`, and text that parses to the validated shared error object.
+
+All tool input schemas also use `additionalProperties: false` and the following shared, normative bounds. JSON Schema `maxLength` counts Unicode scalar values. Request decoding rejects duplicate object keys and first validates the complete arguments value as I-JSON: strings contain only Unicode scalar values with no lone surrogate, numbers are finite, and every integer lies in the interoperable range `[-9007199254740991, 9007199254740991]`. After schema validation, the server serializes the parsed `params.arguments` with RFC 8785 JSON Canonicalization Scheme and rejects canonical UTF-8 longer than 65,536 bytes before normalization, query planning, model loading, or catalog access. I-JSON/JCS rejection or a bound violation is `identifier_invalid` on the sole runtime tool-input surface, never an exception leak, truncation, or partial processing. The same RFC 8785 bytes define every aggregate-size boundary fixture.
 
 | Input class | Bounds |
 | --- | --- |
@@ -1077,12 +1083,13 @@ All tool input schemas also use `additionalProperties: false` and the following 
 | Cursor | `minLength: 1`, `maxLength: 2048`, plus authenticated-cursor syntax and release binding. |
 | Any filter array | `maxItems: 64` and `uniqueItems: true`; `search_evidence` accepts at most 256 total values across all filter arrays. |
 | Result limit | Integer in the inclusive range 1-100. |
+| Page number | Integer in the inclusive range 1-2,147,483,647 and no greater than the selected document's manifested page count. |
 
 The same limits apply before and after the field's specified normalization: a client cannot use trimming, Unicode normalization, or duplicate removal to turn an over-limit input into an accepted one. Boundary-value tests cover the exact maximum and one-over values for every string/list class, aggregate bytes, and total filter values, and assert that the retrieval service and model loader are not invoked after rejection.
 
 Every handler returns an internal typed result to one central outbound serializer; that serializer constructs each public result from an explicit per-type field allowlist and fails closed on an unknown field. Diagnostics use code-owned message templates and per-code allowlists for detail keys and value types; raw exception strings, `repr` output, and arbitrary caller-supplied diagnostic messages are never serialized. The legacy text block is generated only from the already validated public object, not through a second formatting path. Raw source paths and internal workspace layout are not allowlisted and therefore cannot appear in either representation. Security regression tests inject an internal path as an extra field and inside otherwise allowed `message` and `details` values, and require both structured and legacy serialization to reject or safely redact it without emitting the sentinel.
 
-The following semantic contract is normative; the JSON Schemas must encode it directly rather than replacing it with unconstrained objects.
+The following semantic contract is normative. Each tool's input and advertised success-output schemas encode its selection and success columns directly rather than using unconstrained objects; the separate strict error schema plus Section 31 routing encode the domain-error column.
 
 | Tool | Selection semantics | Success result | Domain-error cases |
 | --- | --- | --- | --- |
@@ -1116,7 +1123,7 @@ standards://page/{document_id}/{page_number}
 standards://release/current
 ```
 
-Resource URI variables follow the same catalog-first resolution rule as tool inputs.
+Resource URI variables follow the same catalog-first resolution rule as tool inputs. Templates use RFC 6570 simple-string expansion over each normalized semantic value: encode it as UTF-8, leave only RFC 3986 unreserved bytes literal, and percent-encode every other byte with uppercase hexadecimal. The server decodes each route segment exactly once with strict UTF-8, rejects malformed escapes and any segment whose decoded-then-re-encoded form is not byte-identical, then applies field normalization and catalog lookup. Raw or non-canonical `/`, `%`, `?`, `#`, spaces, and non-ASCII forms never reach path or SQL construction. URI tests cover each of those characters, lower-case escapes, invalid UTF-8, and a literal percent-encoded-looking clause identifier without double decoding.
 
 | URI | MCP kind | v0.1 capability |
 | --- | --- | --- |
@@ -1128,14 +1135,27 @@ Resource URI variables follow the same catalog-first resolution rule as tool inp
 
 The v0.1 resource catalogue is immutable for one server process. The server does not advertise resource subscription or list-change capabilities.
 
+Every successful `resources/read` result contains exactly one content item whose `uri` is the exact canonical requested URI. No handler returns an empty or multi-item success:
+
+| URI | Content item and exact emitted bytes |
+| --- | --- |
+| `standards://document/{document_id}` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the same safe `{release, document}` success object as `get_document_metadata`. |
+| `standards://clause/{document_id}/{clause_number}` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the same `{release, evidence, warnings}` success object as `get_clause`. |
+| `standards://source/{source_id}` | `TextResourceContents`, `mimeType: text/plain;charset=utf-8`; its `text` is exactly the source chunk's validated `original_text`, with no wrapper or normalization, so UTF-8 encoding reproduces the source-faithful bytes. |
+| `standards://page/{document_id}/{page_number}` | `BlobResourceContents`, `mimeType: application/pdf`; its `blob` is the base64 encoding of the complete verified original PDF, and decoding it yields those exact bytes. The URI and companion tool result select the one-based page for client navigation; `get_page_reference.content_hash` equals the SHA-256 of the decoded PDF bytes (`documents.source_file_hash`), not a rendered-page hash. |
+| `standards://release/current` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the safe immutable release summary and manifest digest. |
+
+The full-PDF page contract avoids pretending that a renderer-created image is an original page. A future bounded single-page representation requires its own media type, deterministic renderer configuration, artifact checksum, and URI version.
+
 ### 22.4 Errors and protocol behavior
 
 - Unknown methods or tools, malformed JSON-RPC, and requests that do not satisfy the MCP request schema are protocol-level JSON-RPC errors.
 - A well-formed tool call that fails semantic validation or execution returns a tool result with `isError: true` and a typed error code, for example `identifier_invalid`, `resource_not_found`, or `feature_unavailable`.
 - A valid search with no matching evidence is a successful result with an empty `evidence` array and an `evidence_insufficient` warning. It is not a protocol error.
+- A resource URI with a malformed route shape, malformed percent escape, invalid UTF-8, or non-canonical encoding returns JSON-RPC `-32602` (`Invalid params`) on both protocol paths, with no `contents`. No catalog lookup occurs.
 - An unknown, well-formed `standards://` resource is never represented as a tool result or an empty `contents` success. `resources/read` returns JSON-RPC `-32602` on the per-request `2026-07-28` path and `-32002` on a `2025-11-25` session. This protocol error is distinct from the ClauseSift `resource_not_found` diagnostic used by tool calls.
 - When a known page resource's external original fails the on-demand containment, size, or hash check, `resources/read` returns JSON-RPC internal error `-32603` on both protocol paths with the code-owned message `Source integrity check failed` and safe data `{code: "source_hash_mismatch", phase: "runtime", severity: "blocking"}`. It returns no `contents`, absolute path, or raw exception text; this denies that resource read without invalidating the immutable release catalogue.
-- Cancellation of an in-progress request follows the per-request revision on the `2026-07-28` path or the initialized session revision on the `2025-11-25` path. Retrieval stops promptly, releases temporary resources, records a non-response cancellation event, and does not publish a partial success or a second tool response.
+- Cancellation of an in-progress request follows the per-request revision on the `2026-07-28` path or the initialized session revision on the `2025-11-25` path. Retrieval stops promptly, releases temporary resources, records a non-response cancellation event, and does not publish a partial success or a second tool response. Each request owns an atomic terminal state initially `pending`; success, tool error, cancellation, and server deadline each attempt one compare-and-set transition. The first successful transition is authoritative, including when events carry equal monotonic timestamps, and every losing completion is discarded before serialization.
 - Progress notifications are emitted only when the client supplied a progress token and the applicable per-request or session revision supports them.
 
 ### 22.5 Worked tool sequence
@@ -1177,21 +1197,21 @@ The intended build sequence is:
 
 1. Scan the inbox and registered source files.
 2. Calculate source hashes.
-3. Recompute and verify approved raw manifest-byte hashes, then safe-load, canonicalize, and validate manifests and their approved content hashes.
+3. Record current raw manifest-byte hashes for provenance, then safe-load, canonicalize, and verify approved manifest-content and source hashes and source sizes.
 4. Detect added, changed, and removed documents.
 5. Select parser routes.
 6. Produce parser-neutral artifacts for every selected route.
 7. Run each adapter's parsing validation and every required dual-parser comparison, finalize the Section 11.3 parser-validation report for both pass and failure paths, and then evaluate the blocking gate; only after the report is durable and all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents deterministically from it.
 8. Construct clause and node trees.
-9. Build node-level page and bounding-box mappings and validate their page counts against the source.
-10. Generate standards-aware chunks and their source rows.
+9. Build the versioned node-level page-provenance artifact and validate its page counts and non-overlapping byte partitions against the source.
+10. Generate standards-aware chunks and their source rows from the canonical model plus that page-provenance artifact.
 11. Extract and resolve cross-references.
 12. Generate lexical and embedding text.
 13. Materialize the candidate SQLite catalog through a connection that verified foreign-key enforcement, require zero rows from `PRAGMA foreign_key_check`, and run every Section 14.1 blocking validation query, including chunk/source totality, source-text and page-span reconstruction, exact-key uniqueness, clause coverage, and cross-reference integrity.
 14. Generate document embeddings only after the catalog gate passes.
 15. Build lexical indexes.
 16. Build vector artifacts.
-17. Run the current regression evaluation and durably persist its versioned raw results; an execution failure produces a sanitized failure record rather than skipping report generation.
+17. Derive `build_content_id` from the canonical manifest hashes, candidate catalog and admitted derived-artifact hashes, evaluation corpus and gate versions, dependency lock, toolchain fingerprint, and reproducible build epoch; run the regression evaluation and durably persist versioned raw results bound to that deterministic ID. An execution failure produces a sanitized failure record rather than skipping report generation.
 18. Complete and finalize the static review reports with canonical-tree, chunk, cross-reference, provenance, and current-run evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
 19. Only after the current evaluation results and report are durable, enforce the documented quality gates.
 20. Confirm that no release-blocking parser, catalog, security, integrity, evaluation, or document-review finding remains open.
@@ -1200,9 +1220,9 @@ The intended build sequence is:
 23. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
 24. Publish the release and atomically update the active pointer.
 
-A failed build must leave the active release unchanged.
+A failure through candidate validation at step 23 must leave `active.json` unchanged. Once step 24 begins its atomic replacement, a crash before the post-replacement directory flush may recover either the complete old or complete new record; recovery verifies the referenced release and records that observed outcome before serving. It never guesses, combines records, or exposes a missing/torn pointer, and a recovered valid new record completes the activation rather than reporting that the active release stayed old.
 
-The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Evaluation gate enforcement is likewise unreachable until step 18 has finalized a report from the same run ID and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 19 while retaining that diagnostic report. Tests must inject failures at the catalog gate, evaluation execution and quality gate, and before and during candidate validation, proving that the required failure reports remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
+The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Evaluation gate enforcement is likewise unreachable until step 18 has finalized a report bound to the same deterministic `build_content_id` and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 19 while retaining that diagnostic report. A wall-clock or random operational run ID exists only in the external operator lifecycle ledger and never enters a release-admitted report or evaluation artifact. Tests must inject failures at the catalog gate, evaluation execution and quality gate, and before and during candidate validation, proving that the required failure reports remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
 
 ---
 
@@ -1214,17 +1234,19 @@ The cache identity should include:
 
 ```text
 source_file_hash
-manifest_bytes_hash
 manifest_content_hash
 parser_name
 parser_version
 parser_configuration
 parser_role_assignment
 parser_neutral_artifact_sha256
+parser_validation_report_sha256
 comparison_gate_version
 comparison_gate_configuration
 ocr_configuration
 normalizer_version
+page_mapper_version
+page_provenance_artifact_sha256
 chunker_version
 cross_reference_resolver_version
 embedding_model
@@ -1232,6 +1254,7 @@ embedding_model_revision
 embedding_model_artifact_sha256
 lexical_index_version
 schema_version
+reproducible_build_epoch
 dependency_lock_hash
 build_toolchain_fingerprint
 ```
@@ -1240,15 +1263,18 @@ The list above is the dependency vocabulary, not one flat cache key. Each artifa
 
 | Cached artifact | Required cache-identity inputs |
 | --- | --- |
-| Canonical parse | Source-file hash; approved manifest-byte and manifest-content hashes; the ordered tuple `(role, adapter name, adapter version, adapter configuration, parser-neutral artifact SHA-256, OCR configuration)` for every selected route; comparison-gate implementation version and configuration when comparison is required; normalizer version; canonical schema version; dependency-lock hash; build-toolchain fingerprint. A critical document's identity therefore includes both `canonical_primary` and `independent_comparator` tuples in role order. |
-| Chunks | Canonical-tree artifact hash; chunker version and configuration; chunk schema version. |
-| Cross-references | Canonical-tree artifact hash; approved `reference_edition_overrides`; cross-reference resolver version and configuration; digest of the sorted target catalogue `(document_id, document_code, edition, canonical_node_tree_hash)`. |
+| Parser-neutral output | Source-file hash and size; approved manifest-content hash; assigned role; adapter name, version, and configuration; parser-neutral schema version; OCR configuration and declared local asset digests; dependency-lock hash; build-toolchain fingerprint. The output hash is a result, never an input to locating this cache entry. |
+| Parser-validation report | Approved manifest-content hash; source-file hash and size; ordered tuples `(role, adapter identity, adapter version, adapter configuration, declared local-asset digests, parser-neutral artifact SHA-256)` for every selected route; every single-parser validator version/configuration; comparison-gate implementation version and configuration when enabled; report schema version. Only a passing deterministic report is promoted into this cache; all attempts retain their diagnostic copy outside it. |
+| Canonical model | Approved manifest-content hash; selected `canonical_primary` artifact SHA-256; hash of the passing parser-validation report; normalizer version and configuration; canonical schema version; dependency-lock hash; build-toolchain fingerprint. The manifest hash preserves document identity and metadata even when two manifests select identical source/parser bytes. No canonical entry is written for a failed report. |
+| Page-provenance map | Canonical-model artifact hash; selected primary parser-neutral artifact SHA-256; source-file hash and size; page-mapper version, configuration, and schema version; dependency-lock hash; build-toolchain fingerprint. Its content-addressed output contains the authoritative ordered node byte spans, page numbers, and optional boxes imported at step 13. |
+| Chunks and source rows | Canonical-model artifact hash; page-provenance artifact hash; chunker version and configuration; chunk, membership, and source-projection schema versions. |
+| Cross-references | Canonical-model artifact hash; approved `reference_edition_overrides`; cross-reference resolver version and configuration; digest of only the resolver-relevant target subset. That sorted subset contains the source document, every candidate whose document code appears in a parsed external reference (all editions for an unqualified code and the named edition for a qualified code), and every document ID named by an approved override, each represented as `(document_id, document_code, edition, canonical_node_tree_hash)`. It is deterministically empty beyond the source document when no external reference or override exists. |
 | Embeddings | Ordered embedding-text hashes from the chunk artifact; embedding model identifier and revision; local model-artifact SHA-256 or external-provider request parameters; embedding configuration; dependency-lock hash; build-toolchain fingerprint. |
 | Lexical index | Ordered search-text and metadata hashes from the chunk artifact; lexical-index engine, version, configuration, and schema version. |
 | Vector index | Embedding artifact hash; vector-index engine, version, distance metric, configuration, dependency-lock hash, and build-toolchain fingerprint. |
-| Release assembly | Hashes of the canonical catalogue and every admitted derived artifact; approved manifest-byte and manifest-content hashes; release schema and configuration; evaluation-corpus and gate-result hashes; dependency-lock hash; build-toolchain fingerprint. |
+| Release assembly | Hashes of the canonical catalogue and every admitted derived artifact; approved manifest-content hashes; release schema and configuration; evaluation-corpus and gate-result hashes; explicit reproducible build epoch; dependency-lock hash; build-toolchain fingerprint. |
 
-Adding or changing a target edition therefore invalidates affected cross-reference artifacts even when the source PDF and its own canonical tree are unchanged. Downstream release assembly is invalidated by the changed cross-reference artifact hash.
+Adding, removing, or changing a resolver-relevant target edition therefore invalidates affected cross-reference artifacts even when the source PDF and its own canonical tree are unchanged; an unrelated document does not invalidate them. Downstream release assembly is invalidated by the changed cross-reference artifact hash. A raw-byte-only manifest formatting change is recorded only in the external operator lifecycle ledger and does not alter semantic cache keys or release bytes.
 
 `build_toolchain_fingerprint` includes the Python implementation and version, operating system and architecture, resolved package set, and native parser/index library versions. Local model artifacts are identified by the digest of the bytes actually used, not only a mutable model name or revision string. External providers record provider, model identifier, documented revision, and request parameters; credentials are never part of the cache key or build record.
 
@@ -1260,7 +1286,7 @@ A compiled release may use the following layout:
 
 ```text
 releases/
-└── 2026.08/
+└── <release_id>/
     ├── manifest.json
     ├── build-info.json
     ├── knowledge.sqlite
@@ -1272,13 +1298,18 @@ releases/
     ├── documents/
     ├── pages/
     ├── reports/
+    ├── build-ledger.jsonl
     └── evaluation-results.json
 ```
+
+`release_id` is the filesystem-safe token `rel-sha256-` plus 64 lowercase hexadecimal characters: the SHA-256 of a versioned RFC 8785 release-assembly identity record containing `build_content_id`, sorted `(relative_path, byte_size, sha256)` tuples for every release artifact except `manifest.json`, the complete assembly configuration, and `reproducible_build_epoch`; it excludes `release_id`, final manifest bytes, `active.json`, and all operational timestamps to avoid recursion. Any different admitted byte, declared assembly input, or epoch therefore produces a different ID. An optional human `release_label`, such as `2026.08`, is display metadata included in that identity record and is never used for equality, cursor binding, directory selection, or activation.
 
 The release manifest records:
 
 - release identifier;
-- build timestamp;
+- optional human release label;
+- deterministic build-content identifier;
+- reproducible build epoch;
 - document and chunk counts;
 - schema version;
 - parser and chunker versions;
@@ -1286,13 +1317,16 @@ The release manifest records:
 - vector dimensions and dtype;
 - index engine versions;
 - source and artifact checksums;
+- terminal hash of the sealed `build-ledger.jsonl`;
 - evaluation summary.
 
-The artifact table is exhaustive for release-relative files the runtime may open and records relative path, byte size, media type, and SHA-256. `manifest.json` is not recursively listed in its own table; its complete-byte digest is stored in the activation record. Original source PDFs remain external workspace inputs rather than release artifacts: the document record stores their approved hash and size, `get_page_reference` validates availability before issuing a URI, and the page-resource handler rechecks hash and size immediately before opening an original. `chunks.jsonl` is an optional audit/export projection of SQLite and is never runtime authority. `build-info.json` records the build-toolchain fingerprint and dependency-lock hash.
+The artifact table is exhaustive for release-relative files the runtime may open and records relative path, byte size, media type, and SHA-256. `manifest.json` is not recursively listed in its own table; its complete-byte digest is stored in `active.json`. Original source PDFs remain external workspace inputs rather than release artifacts: the document record stores their approved hash and size, `get_page_reference` validates availability before issuing a URI, and the page-resource handler rechecks hash and size immediately before opening an original. `chunks.jsonl` is an optional audit/export projection of SQLite and is never runtime authority. `build-info.json` records the build-toolchain fingerprint and dependency-lock hash.
 
-The active release may be represented by a symlink or platform-neutral pointer file.
+The immutable `reproducible_build_epoch` is an explicit integer input using `SOURCE_DATE_EPOCH` semantics and is part of the release-assembly identity; a production release fails closed when it is absent. Serializers derive any embedded UTC date from that value and never read the wall clock. Actual build start, finish, validation, and activation times are operational events recorded only in the external operator lifecycle ledger, so identical release inputs produce byte-identical artifacts rather than stale or cache-dependent timestamps.
 
-Before activation, the builder verifies every required artifact and writes the manifest digest into the activation record or pointer metadata. Checksums protect against accidental corruption and partial replacement. The local single-user v0.1 threat model does not claim authenticity against an attacker who can rewrite both the release and activation record; signed release manifests and an external trust root are required before releases are distributed across trust boundaries.
+ClauseSift v0.1 represents the active release with a canonical JSON regular file named `active.json`, containing exactly the release ID and complete manifest digest; a symlink is not an activation pointer. Activation writes a complete sibling temporary file on the same filesystem, flushes that file, atomically replaces `active.json`, and then flushes the parent directory with the platform's documented durability primitive. Activation is successful only after the post-replacement directory flush completes; an orphaned temporary file is never authority and is discarded during recovery. A reader opens and parses one `active.json` snapshot and then verifies that exact manifest digest; it never combines fields from separate reads. Rollback uses the identical protocol. A platform without proven atomic-replacement and post-replacement-directory-flush primitives for this file form is unsupported.
+
+Before activation, the builder verifies every required artifact and writes the manifest digest into the temporary `active.json` described above. Checksums protect against accidental corruption and partial replacement. The local single-user v0.1 threat model does not claim authenticity against an attacker who can rewrite both a release and `active.json`; signed release manifests and an external trust root are required before releases are distributed across trust boundaries.
 
 ---
 
@@ -1312,19 +1346,25 @@ Recommended strategy:
 
 This design retains fast warm queries without creating unnecessary startup memory pressure.
 
-At process startup, the runtime resolves the active pointer once, verifies the activation-record manifest digest, then verifies the checksum, byte size, and expected type of every release artifact it may open. It performs these checks before opening SQLite, indexes, release page files, or arrays. External originals follow the on-demand hash, size, containment, and symlink checks in Sections 22.1 and 26. A mismatch fails startup with `release_integrity_failed`; the runtime never falls back to an older or partially readable artifact without an explicit operator rollback.
+At process startup, the runtime reads `active.json` once, verifies its manifest digest, then verifies the checksum, byte size, and expected type of every release artifact it may open. It performs these checks before opening SQLite, indexes, release page files, or arrays. External originals follow the on-demand hash, size, containment, and symlink checks in Sections 22.1 and 26. A mismatch fails startup with `release_integrity_failed`; the runtime never falls back to an older or partially readable artifact without an explicit operator rollback.
 
 Dense vectors are one numeric `embeddings.f16.npy` matrix opened with `numpy.load(..., mmap_mode="r", allow_pickle=False, max_header_size=10000)`. Object and structured dtypes, pickle-enabled fallback, and `.npz` runtime artifacts are forbidden in v0.1. The runtime requires manifest-declared `float16`, rank two, shape `(chunk_count, vector_dimensions)`, read-only mapping, and the expected file size before serving a query. Other serialized model or index formats require an explicit safe-loading review before admission to the release format.
 
-Lazy embedding and reranker model assets are part of the exhaustive release artifact table even though they are opened after startup. Before invoking a model loader, the runtime rechecks every file that loader may open against its manifest SHA-256 and byte size. ClauseSift v0.1 allowlists non-executable weight formats such as Safetensors or ONNX plus schema-validated JSON/tokenizer assets; pickle-backed PyTorch `.pt`, `.pth`, or `.bin`, joblib, and loaders with arbitrary-code hooks are rejected. The model format, loader name and version, and complete ordered asset digest are recorded in `build-info.json`; a missing, extra, or changed model file fails with `release_integrity_failed` before deserialization. The triggering search receives the routed tool error, after which the process atomically marks the release quarantined, accepts no new requests, cancels or drains existing work without partial successes, and exits non-zero. A restart must fail startup until the operator restores the exact release bytes or rolls back the active pointer.
+Lazy embedding and reranker model assets are part of the exhaustive release artifact table even though they are opened after startup. Before invoking a model loader, the runtime rechecks every file that loader may open against its manifest SHA-256 and byte size. ClauseSift v0.1 allowlists non-executable weight formats such as Safetensors or ONNX plus schema-validated JSON/tokenizer assets; pickle-backed PyTorch `.pt`, `.pth`, or `.bin`, joblib, and loaders with arbitrary-code hooks are rejected. The model format, loader name and version, and complete ordered asset digest are recorded in `build-info.json`; a missing, extra, or changed model file fails with `release_integrity_failed` before deserialization.
+
+Normal work admission is atomic with respect to release state and is capped by schema-validated integer `max_in_flight_requests` in `1..1024`. The transport decoder remains live under saturation so cancellation and other protocol control frames are processed promptly, but it never places work in an unbounded decoded queue. A work request encountered while the admitted set is full is not admitted and receives JSON-RPC server error `-32000` on both protocol paths, with code-owned message `Server busy` and safe data `{code: "feature_unavailable", phase: "runtime", severity: "blocking", reason: "max_in_flight"}`; no handler, retrieval service, or model loader runs. The first lazy-asset integrity failure atomically changes process release state from `active` to `quarantined`, closes work admission, stops the decoder at a declared input-frame boundary, and snapshots the bounded admitted set before any loader runs. A complete work request is therefore either already in that snapshot, already rejected for saturation, or outside the shutdown input boundary; there is no decoded-but-unowned work request.
+
+The triggering search and each snapshotted tool call whose Section 22 terminal state is still `pending` race once to commit `isError: true`, code `release_integrity_failed`, and safe reason `release_quarantined`; a pending `resources/read` races to commit JSON-RPC `-32603` with the same code, phase, and severity. A cancellation, deadline, success, or other error that already won retains its outcome, including cancellation's non-response rule. No new work request is admitted and no success may commit after quarantine. The server terminates and reaps model-loader and other runtime request workers, enqueues at most one terminal frame for each winning transition, and attempts to flush the bounded output set until `quarantine_shutdown_ms`. Cooperative transports acknowledge all frames before non-zero exit. If output remains blocked at the deadline, the server records only the bounded undelivered count and server-generated correlation IDs through the redacted runtime diagnostic sink, never client-controlled JSON-RPC IDs or the operator lifecycle ledger, and forces non-zero exit; bounded shutdown does not claim guaranteed delivery to a non-reading client. A restart must fail startup until the operator restores the exact release bytes or rolls back the active pointer. Tests control state-transition barriers, transport backpressure, and flush acknowledgement rather than relying on timing.
 
 MCP tool calls that trigger lazy loading of the query embedding model or the reranker should emit progress notifications guarded by a client-supplied progress token, so the client can display loading state instead of assuming a stalled call. A call is `cold` when it loads at least one required lazy model, `warm` when every model it uses was already resident, and `model_free` when its selected path uses no model. Section 18 refers to this contract rather than defining a second timeout policy.
 
-Runtime configuration declares an overall tool-call deadline and a per-model load deadline. A cold caller waits no longer than the earlier of those deadlines. If the model-load deadline expires, the shared load attempt is aborted, its single-flight state is cleared, and explicit `hybrid` or `high_accuracy` calls fail with `feature_unavailable` and safe detail `reason: model_load_timeout`; an `auto` call may continue through an already available path within the overall deadline and emits `retrieval_capability_unavailable`.
+Runtime configuration declares a per-caller overall tool-call deadline and a per-attempt model-load deadline. A cold caller waits no longer than the earlier of its own overall deadline and the shared attempt's load deadline. The attempt deadline starts from a monotonic clock when its worker is spawned; every later caller joining that attempt observes the same absolute deadline rather than extending it. Lazy models load and run inference in supervised, terminable worker subprocesses, so timeout enforcement never depends on cancelling an in-process thread. A model handle becomes visible only when the supervisor atomically transitions the attempt from `loading` to `ready`.
 
-If the overall deadline expires first for any cold, warm, or model-free tool call, request-specific work stops promptly, temporary resources are released, and no partial success is published. The server returns exactly one `isError: true` tool result with `code: request_deadline_exceeded`, `phase: runtime`, `severity: blocking`, the code-owned message `Request deadline exceeded`, and safe details limited to `operation` and configured `deadline_ms`; it emits no success or second response. Expiry detaches that caller from a shared model-load attempt but does not abort an attempt still serving another live caller. Client cancellation and deadline expiry race through one atomic terminal-state transition ordered by monotonic observation time: cancellation that wins follows the Section 22 non-response rule, while deadline expiry that wins returns the typed error even if cancellation arrives later. Configured values, winning outcome, and latency are recorded in performance results.
+If the attempt-level model-load deadline wins that transition, the supervisor marks the attempt `timed_out`, terminates and reaps its worker, discards any late completion, clears the single-flight state, and completes each still-live waiter exactly once. An explicit `hybrid` or `high_accuracy` waiter fails with `feature_unavailable` and safe detail `reason: model_load_timeout`; an `auto` waiter may continue through an already available path within its own overall deadline and emits `retrieval_capability_unavailable`.
 
-Lazy initialization is single-flight per model, with at most one model-load attempt running across the process: concurrent callers join the bounded attempt rather than starting duplicate loads. Waiting callers remain independently cancellable. A failed or timed-out load clears the single-flight state but opens a negative-cache cooldown: 30 seconds after the first failure, doubling after consecutive failures to a 10-minute cap. Calls during cooldown do not trigger a loader; explicit modes fail with `feature_unavailable` and safe detail `reason: model_load_backoff`, while `auto` may use an available model-free path with `retrieval_capability_unavailable`. A successful load resets the failure count. The configured deadlines, cooldown state, and attempt count are observable without exposing model paths.
+If the overall deadline expires first for any cold, warm, or model-free tool call and wins the Section 22 atomic terminal transition, request-specific work stops promptly, temporary resources are released, and no partial success is published. The server returns exactly one `isError: true` tool result with `code: request_deadline_exceeded`, `phase: runtime`, `severity: blocking`, the code-owned message `Request deadline exceeded`, and safe details limited to `operation` and configured `deadline_ms`; it emits no success or second response. Expiry detaches only that caller from a shared model-load attempt and does not abort an attempt with another live waiter. Cancellation that wins the transition follows the non-response rule; success or another tool error that commits first remains the sole response even if cancellation or deadline observation follows. If cancellation or overall expiry removes the attempt's final live waiter, the supervisor terminates and reaps the worker, clears the attempt without publishing a handle, and does not count that no-waiter abort as a model failure or open the failure cooldown. Tests use an injectable monotonic clock plus synchronization barriers to force cancellation-first, deadline-first, completion-first, and equal-timestamp transition attempts without wall-clock sleeps. Configured values, winning outcome, and latency are recorded in performance results.
+
+Lazy initialization is single-flight per model and globally load-serialized: at most one attempt for any model runs across the process. Concurrent callers needing that same model join its bounded attempt; a request for a different unloaded model enters a FIFO load queue and remains subject to its own overall deadline. The per-attempt load deadline begins only when that queue entry spawns its worker, never while it is waiting behind another model, and an entry with no live callers is removed without a load or cooldown penalty. Waiting callers remain independently cancellable. A genuine loader failure or attempt-level timeout clears the single-flight state and opens a per-model negative-cache cooldown: 30 seconds after the first failure, doubling after consecutive failures to a 10-minute cap. Calls during cooldown do not trigger a loader; explicit modes fail with `feature_unavailable` and safe detail `reason: model_load_backoff`, while `auto` may use an available model-free path with `retrieval_capability_unavailable`. A successful load resets that model's failure count. Tests use a controllable monotonic clock and a fake supervised worker to cover two joined callers with different overall deadlines, FIFO requests for different models, final-waiter detachment, the load-completion/deadline race, forced worker termination and reaping, late-result rejection, exactly-once caller completion, and per-model cooldown accounting. The configured deadlines, queue/cooldown state, and attempt count are observable without exposing model paths.
 
 ---
 
@@ -1347,6 +1387,8 @@ The report should expose:
 - extracted cross-references.
 
 This provides the most valuable document-inspection capability of a large RAG platform without its operational infrastructure.
+
+All manifest values, parser output, source text, warnings, SVG/XML-like text, and filenames are untrusted report data. The report generator inserts them only through context-aware HTML attribute/text escaping or inert JSON data blocks that escape `<`, `>`, `&`, U+2028, and U+2029; it never concatenates them into markup, URLs, CSS, or script. It rejects or strips active content from derived page assets and emits an offline Content Security Policy at least as strict as `default-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`. Reports make no network request and use only checksummed local assets.
 
 ---
 
@@ -1500,7 +1542,8 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `source_hash_mismatch` | Manifested source admitted to a build | blocking | Build/review report |
 | `source_hash_mismatch` | Runtime `resources/read` of a changed or unsafe external original | blocking | JSON-RPC `-32603` with safe diagnostic data and no contents |
 | `release_integrity_failed` | Runtime startup artifact verification | blocking | Process startup failure and operator diagnostic; no MCP session starts |
-| `release_integrity_failed` | Runtime lazy-model pre-load recheck during `search_evidence` | blocking | `isError: true` tool result; the model loader is not invoked |
+| `release_integrity_failed` | Runtime lazy-model pre-load failure causes quarantine; triggering or other snapshotted admitted tool call still `pending` | blocking | Exactly one `isError: true` tool result is attempted; the failed loader is not invoked and no new work or success starts after quarantine |
+| `release_integrity_failed` | Runtime quarantine transition for a snapshotted admitted `resources/read` still `pending` | blocking | JSON-RPC `-32603` with safe diagnostic data and no contents is attempted |
 | `parser_failed` | Parse subprocess failure or invalid parser-neutral output | blocking | Build/review report |
 | `ocr_low_confidence` | Parse OCR quality review | advisory | Build/review report |
 | `clause_sequence_anomaly` | Parse structural validation | advisory | Build/review report |
@@ -1515,7 +1558,9 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `request_cancelled` | Runtime honored MCP cancellation | blocking | Non-response runtime event and cancellation metric; no tool result is emitted |
 | `request_deadline_exceeded` | Runtime server-enforced overall tool-call deadline | blocking | Exactly one `isError: true` tool result; no partial or later response |
 
-The revision-specific JSON-RPC errors for malformed requests, unknown methods, and `resources/read` misses are protocol-owned errors, not ClauseSift diagnostic codes. Warnings use the object contract from Section 21. Tool errors use the same stable code vocabulary plus a human-readable message and optional safe details. In addition to each tool's row-specific domain errors in Section 22, any tool call may return `request_deadline_exceeded` under the universal deadline contract above. Tests must exercise every routing-table row, assert the two resource-miss wire codes and absence of an empty-content fallback, verify that honored cancellation emits no tool response, and deterministically exercise both sides of the cancellation/deadline race without a duplicate response.
+The JSON-RPC errors for malformed requests, unknown methods, malformed/non-canonical resource URIs, and canonical `resources/read` misses are protocol-owned errors, not ClauseSift diagnostic codes. Warnings use the object contract from Section 21. Tool errors use the same stable code vocabulary plus a human-readable message and optional safe details. In addition to each tool's row-specific domain errors in Section 22, any tool call may return `request_deadline_exceeded` under the universal deadline contract above. Tests must exercise every routing-table row, distinguish the both-revision `-32602` malformed-URI route from the revision-specific canonical-miss wire codes, assert absence of an empty-content fallback, verify that honored cancellation emits no tool response, and deterministically exercise cancellation/deadline/quarantine races without a duplicate response.
+
+The both-revision `-32000` saturation error in Section 27 is likewise a protocol-level admission result rather than a tool execution result; it is emitted before a work request acquires a Section 22 terminal state. Control frames remain processable while work admission is saturated.
 
 ---
 
@@ -1551,14 +1596,14 @@ Every build should record:
 - dependency versions;
 - parser and model revisions;
 - code version or Git commit;
-- build timestamps;
+- wall-clock build timestamps in the external operator lifecycle ledger;
 - warnings and failures;
 - evaluation results;
 - release checksums.
 
-Runtime logs should support debugging retrieval without storing sensitive queries by default. Query logging is configurable and disabled by default. Runtime logs and optional query telemetry are written to an operator-selected state directory outside immutable releases and outside `knowledge.sqlite`; release directories remain read-only. Logs use structured event types, redact paths and credentials at the sink boundary, and record release ID, retrieval mode, stage timings, warning codes, and request correlation ID without evidence text unless explicitly enabled.
+Runtime logs should support debugging retrieval without storing sensitive queries by default. `log_queries` and `log_evidence_text` are separate explicit options and both default to false; enabling query logging never enables evidence logging. Runtime logs and optional query telemetry are written to an operator-selected state directory outside immutable releases and outside `knowledge.sqlite`; release directories remain read-only. Logs use structured event types, redact paths and credentials before dispatch to any sink, and normally record only release ID, retrieval mode, stage timings, warning codes, and request correlation ID. Credentials and absolute/internal paths are never loggable even when either content option is enabled.
 
-Build and release audit events are append-only, sequence-numbered, and hash-chained; the final audit-ledger hash is recorded in the release manifest. Runtime diagnostic and optional query logs are not presented as a security audit trail and need not share that retention policy.
+Audit history has two explicitly bounded chains so an immutable release never claims to contain events that occur after it is sealed. The embedded build ledger is append-only, sequence-numbered, and hash-chained through completion of step 20, but contains only deterministic event data, `build_content_id`, phase sequence numbers, artifact hashes, and the explicit reproducible build epoch—never a random run ID or wall-clock observation. It is then sealed as `build-ledger.jsonl`, and its terminal hash is recorded in the release manifest. A separate operator lifecycle ledger outside the release directory records an operational run ID, actual build start/finish and failures, candidate assembly, manifest/checksum validation, smoke-test outcome, publication, active-pointer switch, rollback, and recovery with wall-clock times. That external chain begins with the operational run ID; when available it anchors `build_content_id`, after step 20 it anchors the terminal build-ledger hash, and after assembly it anchors `release_id` and the complete manifest digest. Every later entry links to its predecessor. Build, assembly, or activation failure can therefore be recorded without mutating candidate bytes, and “terminal” always names a declared chain cutoff rather than future events. Runtime diagnostic and optional query logs are not presented as either audit chain and need not share their retention policy.
 
 ---
 
@@ -1566,7 +1611,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 
 ### 34.1 Unit tests
 
-- manifest validation, including canonical `sha256:<64-lowercase-hex>` form, rejection of placeholders that do not match the selected source, rejection of a raw comment, whitespace, encoding, or key-order change that preserves canonical content but changes the approved manifest-byte hash, and exact acceptance of the closed `active`, `superseded`, and `withdrawn` status enum with `document_status_unknown` for every other token;
+- manifest validation, including canonical `sha256:<64-lowercase-hex>` form, rejection of placeholders that do not match the selected source, semantic approval invalidation on canonical-content or source change, acceptance plus provenance logging of raw comment, whitespace, encoding, or key-order-only changes, and exact acceptance of the closed `active`, `superseded`, and `withdrawn` status enum with `document_status_unknown` for every other token;
 - canonical model validation;
 - text normalization;
 - clause-number parsing, normalization, nullable non-addressable semantics, and rejection of duplicate exact-addressable `(document_id, clause_number)` keys;
@@ -1575,42 +1620,49 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - query token detection;
 - rank fusion;
 - context expansion rules, including required empty arrays for false include flags and true flags with no matching relation, plus a multi-node source chunk whose every member contributes context under deterministic semantic deduplication and ordering;
-- exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks;
-- rejection of duplicate source mappings, release-admitted chunks with no source, null or empty chunk `original_text`, invalid member spans or ordering, reconstructed-text mismatches, missing or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the chunk-derived projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
+- exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks and rejection of a candidate chunk containing any retrievable out-of-subtree member or members from two independently addressable branches;
+- rejection of duplicate source mappings, release-admitted chunks with no source, invalid/escaping source locators or mismatched source sizes, null or empty chunk `original_text`, incorrect deepest-common-ancestor citation nodes, invalid member spans or ordering, reconstructed-text mismatches, missing, overlapping, duplicate, gapped, out-of-order, or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the authoritative mapping projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases, including rejection of an existing but semantically wrong target node, code, edition, or document-root target; resolved rows compare parsed code and edition with joined targets, while unresolved rows retain parsed evidence with null target IDs/projections and perform no joined-field equality check;
 - global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - connection-factory enforcement and readback of `PRAGMA foreign_keys = ON`, runtime `query_only`, zero-row builder/runtime `foreign_key_check`, and rejection of a deliberately injected ownership violation created through an external enforcement-disabled fixture connection;
 - one-root node-tree reachability and acyclicity, parent-before-child ordering, reciprocal immediate previous/next links, and rejection of self-parent, multi-node parent-cycle, disconnected-node, and cyclic chunk-parent fixtures;
 - target-node/document consistency and every `resolution_status` constraint;
 - tier-specific cross-reference severity and release-gate selection;
-- per-artifact cache-key dependency selection, raw manifest-byte invalidation, parser-role and comparison-configuration invalidation, and target-catalogue invalidation;
+- per-artifact cache-key dependency selection, semantic manifest invalidation without raw-format over-invalidation, parser-neutral/report/canonical/page-provenance/chunk cache layering, adapter-provenance invalidation even when output bytes match, same-source manifests with different document identity never colliding, page-mapper invalidation, parser-role and comparison-configuration invalidation, and resolver-relevant target-catalogue invalidation without unrelated-document churn;
 - release checksum verification;
 - identifier and path-containment validation;
 - central response-field and diagnostic-detail allowlists, including path injection as an extra field and inside allowed structured and legacy string fields;
 - every Section 31 routing-table row and cancellation outcome;
-- exact-maximum and one-over query, identifier, cursor, filter-list, total-filter, and aggregate-argument bounds, with every rejection routed to `identifier_invalid` before retrieval or model loading;
+- exact-maximum and one-over query, identifier, cursor, filter-list, total-filter, page-number, I-JSON safe-integer, and RFC 8785 aggregate-argument bounds, including escaped lone-surrogate and out-of-interoperable-range integer fixtures, with every rejection routed to `identifier_invalid` before retrieval or model loading;
 - human-grader reliability for ordinary label distributions, a unanimous single-category release sample that passes only through exact agreement plus a non-degenerate passing calibration set, and blocking degenerate-calibration or below-threshold cases;
 
 ### 34.2 Integration tests
 
 - parser adapter to canonical model;
-- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete parser-validation report before blocking, construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that selects the configured primary parser artifact byte-for-byte and produces byte-identical canonical output on rebuild;
+- adversarial parser-isolation fixtures that attempt network access; reads outside the selected source/runtime/assets allowlist; writes outside the dedicated temporary directory; and CPU, memory, wall-time, output-file-size, and page-count overruns, with isolation-setup failure blocking before adapter execution;
+- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete diagnostic parser-validation report before blocking, promote no failed report and construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that byte-for-byte promotes its report, selects the configured primary parser artifact, and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
 - a deliberately invalid catalog that fails at step 13 and invokes or caches no embedding, lexical-index, or vector-index builder while leaving the active release unchanged;
-- a current-run evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the failing run ID and raw-result hash or failure record before step 19 blocks, while leaving the active release unchanged;
+- an evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the deterministic `build_content_id` and raw-result hash or failure record before step 19 blocks, while any operational run ID remains external and the active release remains unchanged;
+- byte-stable `knowledge.sqlite` after the step 13 gate, with current-run results written only to the checksummed evaluation artifact and no later catalog mutation;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
 - rejection of pickled/object NumPy arrays and mismatched dtype, shape, size, or checksum;
-- rejection of a lazy model with a changed, missing, extra, or pickle-backed weight artifact before loader invocation, routed as `release_integrity_failed` without a partial result, followed by release quarantine, non-zero process exit, and failed restart until rollback or repair;
+- rejection of a lazy model with a changed, missing, extra, or pickle-backed weight artifact before loader invocation; a bounded controlled admitted set must prove pending tool/resource calls race to their quarantine surfaces, a cancellation that already won keeps its non-response outcome, no work request is admitted and no success commits after the transition, workers are reaped, cooperative writers flush all committed frames, a blocked writer forces exit at the shutdown bound with redacted undelivered-frame accounting, and restart fails until rollback or repair;
 - CLI search;
 - MCP tool invocation;
-- MCP compatibility for `2026-07-28` and `2025-11-25`, including structured output, pagination, `-32602` versus `-32002` resource misses, `-32603` external-original integrity failures with required `code`, `phase`, and `severity`, no empty-content fallback, exactly one typed tool error after server deadline expiry, and no tool response after honored cancellation;
+- MCP compatibility for `2026-07-28` and `2025-11-25`, including success-schema validation versus error results with absent `structuredContent`; `resultType: "complete"` and the fixed cache hints on only the new wire path; authenticated filter/order/release-bound keyset cursors; canonical percent-encoded resource identifiers; both-revision `-32602` for malformed/non-canonical resource URIs versus revision-specific `-32602`/`-32002` canonical misses; both-revision `-32000` saturation without handler invocation while cancellation/control frames still progress; every resource's exact one-item text/blob/MIME/hash success contract; `-32603` external-original integrity failures with required `code`, `phase`, and `severity`; no empty-content fallback; and barrier-controlled completion-first, deadline-first, cancellation-first, quarantine-first, and equal-timestamp races without duplicate responses or wall-clock sleeps;
 - indexed query plans for exact clause, jurisdiction, discipline, status, and document-type filters;
 - a target-edition catalogue change that invalidates cross-references and release assembly while an unrelated parse cache remains valid;
 - a standard document with an unresolved reference that ships only with an advisory and no target IDs, contrasted with a critical document whose same unresolved status blocks publication;
 - candidate-release smoke tests before the active-pointer switch;
+- crash injection before temporary-file flush, immediately before replacement, after replacement but before the parent-directory flush, and after that flush; recovery must yield the complete old or new `active.json` before the final flush, must yield the new record after it, and must never expose a missing or torn record. Concurrent readers prove the same old-or-new property, and rollback passes the identical suite;
 - injected build and validation failures proving the active release is unchanged;
+- build-ledger sealing at the step 20 cutoff and external operator-lifecycle-ledger chaining for candidate validation, publication, pointer-switch failure, and rollback without modifying sealed release bytes;
+- byte-identical release artifacts, deterministic `build_content_id`, and identical `release_id` across separate operational runs with the same explicit reproducible build epoch; a changed admitted artifact, assembly input, display label, or epoch must change `release_id`, while random run IDs and wall-clock timestamps appear only in external ledger events;
+- adversarial static-report rendering with HTML, SVG, URL, CSS, and script sentinels in every untrusted field, verifying inert display, the restrictive offline CSP, and zero external requests;
 - OS-read-only release operation and query logging that leaves every release byte unchanged;
+- log-sink tests injecting credential, absolute-path, query, evidence-text, and client-controlled JSON-RPC-ID sentinels through successes, failures, saturation, and blocked quarantine flushes, proving credentials, paths, and client IDs never appear in any sink; query/evidence text is absent by default, explicit opt-in affects only its documented fields, undelivered frames use only server-generated correlation IDs, and redaction occurs before every configured sink;
 
 ### 34.3 Regression tests
 
