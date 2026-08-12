@@ -274,6 +274,39 @@ Unresolved references remain explicit non-navigable records. Cycles in structura
 
 Sections 12–14 define graph nodes and relational persistence, Sections 19–20 define context and semantic relationships, and Section 21 defines serialization. Later sections may refine relationship, provenance, traversal, and conflict contracts, but they must reuse this layered model rather than introduce a parallel graph or entity system.
 
+### 7.2 Evidence Lineage
+
+**Evidence Lineage** is the mandatory, deterministic derivation record for every Evidence Package item. It answers three separate questions without changing source authority: where the quoted evidence came from, which build transformations produced its canonical representation, and why the runtime selected or attached it. The complete lineage is:
+
+```text
+approved manifest + exact source bytes
+    -> parser-neutral output(s) + parser-validation report
+    -> canonical node(s) + page-provenance mappings
+    -> chunk + source record
+    -> checksummed lexical/vector/model artifacts
+    -> retrieval candidate + fusion/rerank decision
+    -> zero or more typed context edges
+    -> Evidence Package item
+```
+
+The contract has three non-interchangeable dimensions:
+
+| Dimension | Required meaning | Authority boundary |
+| --- | --- | --- |
+| **Source provenance** | Approved manifest-content hash, exact source-file hash and size, stable document/source identities, contributing canonical-node byte spans, and their ordered page/box mappings. | Original source bytes and the approved manifest remain authoritative. Missing optional boxes are represented explicitly; they are never reconstructed by a model. |
+| **Build provenance** | Ordered parser roles and content hashes, passing validation-report hash, canonical/page/chunk transformation hashes and versions, stable node/chunk identities, diagnostic state, catalog hash, `build_content_id`, and lineage-schema version. | Parsers and deterministic transforms describe derivation, not new source facts. A comparator validates the selected primary output but never silently merges into it. |
+| **Retrieval and assembly provenance** | Every contributing retrieval channel and release-artifact hash, candidate rank/score where meaningful, rerank decision, selection role, originating seed source, and each accepted context path as ordered typed edge steps with rule IDs. | Indexes, scores, ranking models, and traversal choices are non-authoritative selection metadata. They cannot create source text, applicability, or graph relationships. |
+
+The builder materializes the first two dimensions plus release-artifact references as RFC 8785 canonical `lineage.json` after the retrieval artifacts are complete and before `build_content_id` is derived. It contains exactly one record for every manifested document and, beneath it, exactly one source-lineage record for each of that document's catalog `sources` rows. It identifies every selected parser route and ordered transformation by kind, role, producer/version/configuration hash, and content hash, and identifies the canonical catalog and retrieval artifacts. It contains no source locator, source text, credential, wall-clock timestamp, random run ID, `build_content_id`, `release_id`, or self-hash. The internal catalog retains the normalized source locator needed for authorized page access, but that path is never a public lineage field. The later release manifest binds the lineage-file hash, `build_content_id`, and `release_id` without a recursive identity dependency. The runtime joins that verified record to the catalog's node, chunk, source, membership, and page-span rows and adds the per-request assembly dimension; no parallel entity store is introduced.
+
+Lineage is release-scoped and immutable. Stable document, node, chunk, source, relationship-occurrence, and edge identities survive a byte-identical rebuild. A changed source hash, approved manifest content, selected parser/configuration, canonical transformation, retrieval artifact, lineage schema, or admitted traversal/ranking configuration changes the corresponding artifact hash and therefore the build/release identity. A different runtime query changes only its per-request assembly lineage and never mutates the release. Reusing a filename for different bytes cannot preserve lineage, rollback restores the earlier release and its lineage together, and regenerated indexes are distinguishable unless their admitted bytes and all declared inputs are identical.
+
+For source-bearing evidence, ordered lineage spans are the exact intersections of `chunk_nodes` membership with `node_page_spans`. They support a chunk assembled from several blocks or pages without inventing one scalar origin. `coordinate_status` is `page_and_box` only when every contributing page mapping has validated boxes and `page_only` otherwise; a missing box is accompanied by `source_coordinate_incomplete`. Because Section 14.1 requires complete page mapping for non-empty source text, `unavailable` is reserved for non-source structural records and is invalid on an Evidence Package evidence item. OCR use, minimum admitted OCR confidence, and parser-comparison status remain build uncertainty rather than source facts. A below-threshold comparison difference may ship only with `parser_comparison_difference`; a blocking disagreement produces no release and therefore no evidence lineage.
+
+Runtime assembly records use the closed selection roles `retrieval_seed` and `expanded_context`; both may appear when an item was independently retrieved and also reached from another seed. A direct result has its own `source_id` as a seed and an empty context-path array. An expanded item names every contributing seed and at least one accepted path. Each path binds one originating seed to ordered steps; every step records the stable edge ID, canonical relation type and origin, traversal direction, source and target node IDs, ordered occurrence IDs when present, and the versioned context-rule ID. Exact duplicate `(seed source, edge-ID sequence)` paths are collapsed; independent paths are retained in deterministic order. An unresolved or ambiguous relationship has no navigable edge or path: it remains a warning-bearing occurrence and can never explain inclusion of an absent target.
+
+Every public evidence item must carry the strict Section 21 lineage object. The central serializer constructs it only from the checksum-verified active release and typed runtime decisions, rejects missing or unknown fields, and never accepts client-supplied lineage. Absolute paths, raw parser internals, configuration bodies, exception text, and secrets are excluded; hashes and safe producer identifiers are sufficient for reproducibility. Generated summaries, model scores, and future inferred metadata remain explicitly non-authoritative and cannot be cited as source provenance.
+
 ---
 
 ## 8. Package and distribution design
@@ -499,7 +532,7 @@ The builder must test:
 
 Comparison mode is mandatory for every `critical` document and optional for a `standard` document. The enabled state is part of the versioned, approved parser-routing configuration and cache identity; changing it requires review before rebuilding, so a failed standard comparison cannot be bypassed by silently disabling the mode. Whenever comparison mode is enabled, the document must be parsed independently by two configured adapters backed by distinct parser implementations; running one implementation twice or changing only its options does not satisfy this rule. Neither adapter's output becomes canonical until the comparison gate passes. Enabling comparison mode is therefore a gating build-policy choice, not an advisory shadow run.
 
-For every comparison-mode document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds the configuration selected for that document's release tier. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which remains available after failure and is never itself canonical authority. A passing report is additionally promoted byte-for-byte into the content-addressed parser-validation cache and its hash becomes a canonical-model input; a failed report is retained only as a diagnostic and never enters canonical or downstream artifact caches. A blocked document may proceed only after correcting the parser, source, manifest, or comparison-mode routing configuration and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
+For every comparison-mode document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds the configuration selected for that document's release tier. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which remains available after failure and is never itself canonical authority. A passing report is additionally promoted byte-for-byte into the content-addressed parser-validation cache and its hash becomes a canonical-model input; a failed report is retained only as a diagnostic and never enters canonical or downstream artifact caches. A passing comparison with any non-zero below-threshold difference records `parser_comparison_difference` in that promoted report so Section 7.2 can preserve the uncertainty on affected evidence. A blocked document may proceed only after correcting the parser, source, manifest, or comparison-mode routing configuration and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
 
 The versioned parser-routing configuration must name exactly one `canonical_primary` for every document. It additionally names exactly one ordered `independent_comparator` for every comparison-mode document, either directly or through a deterministic rule over manifested fields; a standard document outside comparison mode has only the primary route. Every selected adapter's identity, version, configuration, and assigned role is a build input. After the primary's single-parser gate and, when applicable, the comparator's single-parser gate and comparison gate pass, the builder selects the `canonical_primary` parser-neutral artifact byte-for-byte as the sole input to deterministic canonical-model construction; the comparator is validation-only. Below-threshold wording or OCR differences therefore resolve to the primary output, never to field-by-field merging, majority selection, or build-order choice. Changing an adapter or role invalidates the parse and all downstream cache entries and requires a complete rebuild and review. With unchanged source bytes, ordered roles, adapters, and configurations, both the selected parser artifact and resulting canonical model must be byte-identical across rebuilds.
 
@@ -1017,13 +1050,147 @@ Example:
       "original_text": "...",
       "citation": "[AS 1668.1:2015, cl. 4.6.2, p.47]",
       "bounding_boxes": [],
-      "retrieval_channels": [
-        "lexical",
-        "dense"
-      ],
-      "rerank_score": 0.91,
-      "source_file_hash": "sha256:...",
-      "warnings": []
+      "lineage": {
+        "lineage_schema_version": "0.1.0",
+        "source": {
+          "manifest_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_file_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "source_file_size": 4821936,
+          "coordinate_status": "page_only",
+          "spans": [
+            {
+              "node_id": "node-requirement-001",
+              "node_text_start": 0,
+              "node_text_end": 128,
+              "page_spans": [
+                {
+                  "page_number": 47,
+                  "node_text_start": 0,
+                  "node_text_end": 128,
+                  "bounding_boxes": []
+                }
+              ]
+            }
+          ]
+        },
+        "build": {
+          "build_content_id": "build-sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "lineage_artifact_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "catalog_artifact_sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "chunk_id": "chunk-001",
+          "canonical_node_ids": [
+            "node-requirement-001"
+          ],
+          "transform_artifacts": [
+            {
+              "kind": "parser_neutral",
+              "role": "canonical_primary",
+              "producer_id": "docling",
+              "producer_version": "2.4.0",
+              "configuration_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "artifact_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            {
+              "kind": "parser_validation_report",
+              "role": "validation",
+              "producer_id": "clausesift-parser-validator",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+              "artifact_sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+            },
+            {
+              "kind": "canonical_model",
+              "role": "transform",
+              "producer_id": "clausesift-canonicalizer",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+              "artifact_sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            {
+              "kind": "page_provenance",
+              "role": "transform",
+              "producer_id": "clausesift-page-mapper",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+              "artifact_sha256": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+            },
+            {
+              "kind": "chunk_projection",
+              "role": "transform",
+              "producer_id": "clausesift-chunker",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+              "artifact_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+            },
+            {
+              "kind": "relationship_resolution",
+              "role": "transform",
+              "producer_id": "clausesift-relationship-resolver",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000005",
+              "artifact_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000006"
+            }
+          ],
+          "uncertainty": {
+            "ocr_status": "not_used",
+            "minimum_ocr_confidence": null,
+            "parser_comparison_status": "not_required"
+          }
+        },
+        "assembly": {
+          "selection_roles": [
+            "retrieval_seed"
+          ],
+          "seed_source_ids": [
+            "src-001"
+          ],
+          "retrievals": [
+            {
+              "channel": "lexical",
+              "channel_version": "fts5.v1",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000009",
+              "artifact_set_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+              "candidate_rank": 2,
+              "score": 12.4
+            },
+            {
+              "channel": "dense",
+              "channel_version": "exact-cosine.v1",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000010",
+              "artifact_set_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000003",
+              "candidate_rank": 4,
+              "score": 0.78
+            }
+          ],
+          "fusion": {
+            "algorithm_id": "rrf.v1",
+            "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000007",
+            "rank": 1,
+            "score": 0.0325
+          },
+          "rerank": {
+            "model_id": "example-cross-encoder",
+            "model_revision": "rev-1",
+            "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000008",
+            "artifact_set_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000004",
+            "rank": 1,
+            "score": 0.91
+          },
+          "context_paths": []
+        }
+      },
+      "warnings": [
+        {
+          "code": "source_coordinate_incomplete",
+          "phase": "runtime",
+          "severity": "advisory",
+          "message": "Source page is known but bounding-box coverage is incomplete.",
+          "source_id": "src-001",
+          "details": {
+            "lineage_stage": "source"
+          }
+        }
+      ]
     }
   ],
   "warnings": [
@@ -1032,15 +1199,74 @@ Example:
       "phase": "runtime",
       "severity": "advisory",
       "message": "Applicability depends on building classification.",
-      "source_id": "src-001"
+      "source_id": "src-001",
+      "details": {
+        "lineage_stage": "assembly"
+      }
+    },
+    {
+      "code": "source_coordinate_incomplete",
+      "phase": "runtime",
+      "severity": "advisory",
+      "message": "Source page is known but bounding-box coverage is incomplete.",
+      "source_id": "src-001",
+      "details": {
+        "lineage_stage": "source"
+      }
     }
   ]
 }
 ```
 
+The item above is a direct retrieval seed: both retrieval channels and the reranker are identified, its own source is the seed, and `context_paths` is empty. An expanded exception attached to that seed instead has this assembly lineage excerpt; its required source and build objects have the same complete shape as above:
+
+```json
+{
+  "source_id": "src-exception-001",
+  "lineage": {
+    "assembly": {
+      "selection_roles": [
+        "expanded_context"
+      ],
+      "seed_source_ids": [
+        "src-001"
+      ],
+      "retrievals": [],
+      "fusion": null,
+      "rerank": null,
+      "context_paths": [
+        {
+          "seed_source_id": "src-001",
+          "steps": [
+            {
+              "edge_id": "edge-exception-001",
+              "relation_type": "exception_to",
+              "relation_origin": "source_text",
+              "direction": "reverse",
+              "from_node_id": "node-requirement-001",
+              "to_node_id": "node-exception-001",
+              "occurrence_ids": [
+                "xref-exception-001"
+              ],
+              "context_rule_id": "context.exception.v1"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+`lineage`, `source`, `build`, `uncertainty`, `assembly`, every artifact reference, retrieval record, path, and path step are closed objects with `additionalProperties: false`; all fields shown in the complete direct-item example are required, with only the explicitly nullable values allowed to be null. The enclosing item's `document_id` and `source_id` select the document/source lineage record and must match it exactly. Source spans are sorted by `(node member_order, node_text_start, node_text_end)`, and their page spans repeat the exact intersecting node-byte start/end in validated `mapping_order`; those intervals must form the same complete non-overlapping partition as the corresponding catalog mapping. The public `page_start`, `page_end`, and `bounding_boxes` fields are convenient projections only: the serializer recomputes them from `lineage.source.spans` and fails closed unless they match exactly. `canonical_node_ids` is the ordered membership projection for `chunk_id`; an ID not owned by the item's document or chunk is a release-integrity failure.
+
+`transform_artifacts` follows the stage order in Section 7.2 and contains all selected parser-neutral routes before the validation report and selected canonical transformations, including relationship resolution. `role` is a closed value appropriate to the artifact kind. `producer_id`, `producer_version`, configuration hash, and artifact hash must equal the verified `lineage.json` record. `parser_comparison_status` is `not_required`, `passed_exact`, or `passed_with_differences`; the last value requires an evidence-bound `parser_comparison_difference` warning. `ocr_status` is `not_used` or `used`; when used, `minimum_ocr_confidence` is the minimum confidence of the contributing spans and a below-policy value requires `ocr_low_confidence`.
+
+`selection_roles` and `seed_source_ids` are non-empty, unique, and canonically sorted. Retrieval records use the closed channels `exact`, `lexical`, and `dense`, are ordered by the versioned channel rank, and identify the exact checksummed release artifact set that produced the candidate; context-only items have an empty array, while a retrieval seed has at least one record. `candidate_rank` is one-based, and `score` is a finite number or null only for an exact lookup with no numeric scorer. An artifact-set hash is the SHA-256 of the versioned canonical ordered `(relative_path, byte_size, sha256)` tuples for its manifest-admitted files, so a multi-file index or model is named without exposing paths in the public object. `fusion` and `rerank` identify their versioned algorithm/model inputs and decision rank/score and are null when that stage did not run. Every context-path object binds one `seed_source_id` to a non-empty ordered `steps` array. Paths are unique by `(seed_source_id, ordered edge-ID sequence)` and sort by `(seed_source_id, path length, ordered edge-ID sequence)` after the bounded traversal in Section 19. Every context-only item has at least one path, and every step must match one release-validated structural or semantic edge. A context item reached by several independent valid paths retains each path; a retrieved item that is also expanded carries both selection roles.
+
 Citation fields are generated programmatically. The AI client must not invent or repair missing citations.
 
-Every warning is an object with a Section 31 `code`, `phase`, `severity`, a human-readable `message`, and optional `source_id` and structured `details`; bare warning strings are invalid. `original_text` and other document-derived fields are untrusted quoted evidence, not instructions to the MCP host or model. Evidence items carry `content_trust: "untrusted_source"`, and tool descriptions instruct clients to preserve that boundary.
+Every warning is an object with a Section 31 `code`, `phase`, `severity`, a human-readable `message`, and optional `source_id` and structured `details`; bare warning strings are invalid. Evidence-bound source or build uncertainty is deterministically projected from the admitted diagnostic record into the corresponding Section 31 runtime warning, names the affected `source_id`, and includes the closed `lineage_stage` value `source`, `build`, or `assembly` plus a diagnostic-artifact hash when that code's details contract permits it. Top-level warnings are the union of item warnings and request-level assembly warnings, deduplicated by complete canonical warning bytes and sorted by `(code, phase, source_id-or-empty, canonical details bytes, message)`; warning absence never erases `coordinate_status` or the build uncertainty object. `original_text` and other document-derived fields are untrusted quoted evidence, not instructions to the MCP host or model. Evidence items carry `content_trust: "untrusted_source"`, and tool descriptions instruct clients to preserve that boundary.
 
 ---
 
@@ -1283,18 +1509,19 @@ The intended build sequence is:
 14. Generate exactly one chunk embedding per persisted chunk in the declared deterministic row order, only after the catalog gate passes.
 15. Build lexical indexes.
 16. Build vector artifacts.
-17. Derive `build_content_id` from the canonical manifest hashes, candidate catalog and admitted derived-artifact hashes, evaluation corpus and gate versions, dependency lock, toolchain fingerprint, and reproducible build epoch; run the regression evaluation and durably persist versioned raw results bound to that deterministic ID. An execution failure produces a sanitized failure record rather than skipping report generation.
-18. Complete and finalize the static review reports with canonical-tree, chunk, cross-reference, provenance, and current-run evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
-19. Only after the current evaluation results and report are durable, enforce the documented quality gates.
-20. Confirm that no release-blocking parser, catalog, security, integrity, evaluation, or document-review finding remains open.
-21. Assemble a candidate release.
-22. Validate the release manifest and every required artifact checksum.
-23. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
-24. Publish the release and atomically update the active pointer.
+17. Materialize the versioned `lineage.json` described in Section 7.2 from the exact source, parser, canonical, page, chunk, catalog, and retrieval-artifact records.
+18. Derive `build_content_id` from the canonical manifest hashes, candidate catalog and admitted derived-artifact hashes including `lineage.json`, evaluation corpus and gate versions, dependency lock, toolchain fingerprint, and reproducible build epoch; run the regression evaluation and durably persist versioned raw results bound to that deterministic ID. An execution failure produces a sanitized failure record rather than skipping report generation.
+19. Complete and finalize the static review reports with canonical-tree, chunk, cross-reference, provenance, and current-run evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
+20. Only after the current evaluation results and report are durable, enforce the documented quality gates.
+21. Confirm that no release-blocking parser, catalog, security, integrity, evaluation, or document-review finding remains open.
+22. Assemble a candidate release.
+23. Validate the release manifest and every required artifact checksum.
+24. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, lineage, and rollback smoke tests.
+25. Publish the release and atomically update the active pointer.
 
-A failure through candidate validation at step 23 must leave `active.json` unchanged. Once step 24 begins its atomic replacement, a crash before the post-replacement directory flush may recover either the complete old or complete new record; recovery verifies the referenced release and records that observed outcome before serving. It never guesses, combines records, or exposes a missing/torn pointer, and a recovered valid new record completes the activation rather than reporting that the active release stayed old.
+A failure through candidate validation at step 24 must leave `active.json` unchanged. Once step 25 begins its atomic replacement, a crash before the post-replacement directory flush may recover either the complete old or complete new record; recovery verifies the referenced release and records that observed outcome before serving. It never guesses, combines records, or exposes a missing/torn pointer, and a recovered valid new record completes the activation rather than reporting that the active release stayed old.
 
-The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Evaluation gate enforcement is likewise unreachable until step 18 has finalized a report bound to the same deterministic `build_content_id` and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 19 while retaining that diagnostic report. A wall-clock or random operational run ID exists only in the external operator lifecycle ledger and never enters a release-admitted report or evaluation artifact. Tests must inject failures at the catalog gate, evaluation execution and quality gate, and before and during candidate validation, proving that the required failure reports remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
+The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, vector-index, or lineage artifact. Evaluation gate enforcement is likewise unreachable until step 19 has finalized a report bound to the same deterministic `build_content_id` and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 20 while retaining that diagnostic report. A wall-clock or random operational run ID exists only in the external operator lifecycle ledger and never enters a release-admitted report or evaluation artifact. Tests must inject failures at the catalog gate, lineage finalization, evaluation execution and quality gate, and before and during candidate validation, proving that the required failure reports remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
 
 ---
 
@@ -1329,6 +1556,7 @@ schema_version
 reproducible_build_epoch
 dependency_lock_hash
 build_toolchain_fingerprint
+lineage_schema_version
 ```
 
 The list above is the dependency vocabulary, not one flat cache key. Each artifact hashes only its declared inputs below, including the hashes of upstream artifacts rather than their paths.
@@ -1344,6 +1572,7 @@ The list above is the dependency vocabulary, not one flat cache key. Each artifa
 | Chunk embeddings | Ordered tuples `(document_id, canonical_order, chunk_id, embedding_text_hash)` from the chunk artifact in the declared row order; `embedding_scope: "chunk"`; row-order version; embedding model identifier and revision; local model-artifact SHA-256 or external-provider request parameters; embedding configuration; dependency-lock hash; build-toolchain fingerprint. |
 | Lexical index | Ordered search-text and metadata hashes from the chunk artifact; lexical-index engine, version, configuration, and schema version. |
 | Vector index | Embedding artifact hash; vector-index engine, version, distance metric, configuration, dependency-lock hash, and build-toolchain fingerprint. |
+| Evidence lineage | Approved manifest-content and exact source hashes/sizes; ordered selected parser-route provenance-envelope hashes; passing parser-validation-report hash; canonical-model, page-provenance, chunk/source, catalog, cross-reference, embedding, lexical-index, and vector-index artifact hashes; lineage schema version. The output excludes its own hash, `build_content_id`, `release_id`, operational IDs, and timestamps. |
 | Release assembly | Hashes of the canonical catalogue and every admitted derived artifact; approved manifest-content hashes; release schema and configuration; evaluation-corpus and gate-result hashes; explicit reproducible build epoch; dependency-lock hash; build-toolchain fingerprint. |
 
 Adding, removing, or changing a resolver-relevant target edition therefore invalidates affected cross-reference artifacts even when the source PDF and its own canonical tree are unchanged; an unrelated document does not invalidate them. Downstream release assembly is invalidated by the changed cross-reference artifact hash. A raw-byte-only manifest formatting change is recorded only in the external operator lifecycle ledger and does not alter semantic cache keys or release bytes.
@@ -1362,6 +1591,7 @@ releases/
     ├── manifest.json
     ├── build-info.json
     ├── knowledge.sqlite
+    ├── lineage.json
     ├── chunks.jsonl
     ├── embeddings.f16.npy
     ├── lexical-index/
@@ -1384,6 +1614,7 @@ The release manifest records:
 - reproducible build epoch;
 - document and chunk counts;
 - schema version;
+- lineage-schema version and `lineage.json` artifact hash;
 - parser and chunker versions;
 - embedding and reranker model identifiers, revisions, formats, and complete asset hashes;
 - chunk-embedding scope, row count, row-order version, vector dimensions, dtype, and normalization state;
@@ -1398,7 +1629,7 @@ The immutable `reproducible_build_epoch` is an explicit integer input using `SOU
 
 ClauseSift v0.1 represents the active release with a canonical JSON regular file named `active.json`, containing exactly the release ID and complete manifest digest; a symlink is not an activation pointer. Activation writes a complete sibling temporary file on the same filesystem, flushes that file, atomically replaces `active.json`, and then flushes the parent directory with the platform's documented durability primitive. Activation is successful only after the post-replacement directory flush completes; an orphaned temporary file is never authority and is discarded during recovery. A reader opens and parses one `active.json` snapshot and then verifies that exact manifest digest; it never combines fields from separate reads. Rollback uses the identical protocol. A platform without proven atomic-replacement and post-replacement-directory-flush primitives for this file form is unsupported.
 
-Before activation, the builder verifies every required artifact and writes the manifest digest into the temporary `active.json` described above. Checksums protect against accidental corruption and partial replacement. The local single-user v0.1 threat model does not claim authenticity against an attacker who can rewrite both a release and `active.json`; signed release manifests and an external trust root are required before releases are distributed across trust boundaries.
+Before activation, the builder verifies every required artifact, validates `lineage.json` against the declared lineage-schema version, proves that every catalog source has exactly one matching lineage record and every lineage reference names an admitted artifact, and writes the manifest digest into the temporary `active.json` described above. Checksums protect against accidental corruption and partial replacement. The local single-user v0.1 threat model does not claim authenticity against an attacker who can rewrite both a release and `active.json`; signed release manifests and an external trust root are required before releases are distributed across trust boundaries.
 
 ---
 
@@ -1418,7 +1649,7 @@ Recommended strategy:
 
 This design retains fast warm queries without creating unnecessary startup memory pressure.
 
-At process startup, the runtime reads `active.json` once, verifies its manifest digest, then verifies the checksum, byte size, and expected type of every release artifact it may open. It performs these checks before opening SQLite, indexes, release page files, or arrays. External originals follow the on-demand hash, size, containment, and symlink checks in Sections 22.1 and 26. A mismatch fails startup with `release_integrity_failed`; the runtime never falls back to an older or partially readable artifact without an explicit operator rollback.
+At process startup, the runtime reads `active.json` once, verifies its manifest digest, then verifies the checksum, byte size, and expected type of every release artifact it may open. It validates the complete `lineage.json`, its declared schema version, referenced artifact hashes, and one-to-one source coverage before accepting a query; evidence serialization reads only that validated immutable representation. It performs these checks before opening SQLite, indexes, release page files, or arrays. External originals follow the on-demand hash, size, containment, and symlink checks in Sections 22.1 and 26. A mismatch fails startup with `release_integrity_failed`; the runtime never falls back to an older or partially readable artifact without an explicit operator rollback.
 
 Page-resource reads share a fixed 67,108,864-byte process working-set budget in v0.1, in addition to the request-count limit below. Before opening a source, the handler computes and atomically reserves `catalog_source_size + 1 + exact_serialized_response_size`; the extra byte is the bounded oversize probe used below. If the release-time response bound would be exceeded, catalog metadata is inconsistent and the read follows `source_hash_mismatch`, while temporary budget exhaustion returns the same both-revision `-32000` `Server busy` admission error defined below with safe reason `response_byte_budget`. No source buffer, probe, base64 value, or outbound frame is allocated before reservation, and the reservation is released on every terminal path.
 
@@ -1593,6 +1824,8 @@ Initial categories:
 - `release_integrity_failed`
 - `parser_failed`
 - `ocr_low_confidence`
+- `parser_comparison_difference`
+- `source_coordinate_incomplete`
 - `clause_sequence_anomaly`
 - `table_structure_anomaly`
 - `cross_reference_unresolved`
@@ -1622,6 +1855,10 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `release_integrity_failed` | Runtime quarantine transition for a snapshotted admitted `resources/read` still `pending` | blocking | JSON-RPC `-32603` with safe diagnostic data and no contents is attempted |
 | `parser_failed` | Parse subprocess failure or invalid parser-neutral output | blocking | Build/review report |
 | `ocr_low_confidence` | Parse OCR quality review | advisory | Build/review report |
+| `ocr_low_confidence` | Runtime lineage assembly for admitted OCR evidence below the advisory threshold | advisory | In-band warning on the affected evidence item and successful tool result |
+| `parser_comparison_difference` | Parse comparison passes with a non-zero below-threshold difference | advisory | Build/review report |
+| `parser_comparison_difference` | Runtime lineage assembly for evidence from an admitted document with a below-threshold parser difference | advisory | In-band warning on the affected evidence item and successful tool result |
+| `source_coordinate_incomplete` | Runtime lineage assembly for source text whose validated page mapping has no complete bounding-box coverage | advisory | In-band warning on the affected evidence item and successful tool result |
 | `clause_sequence_anomaly` | Parse structural validation | advisory | Build/review report |
 | `table_structure_anomaly` | Parse structural validation | advisory | Build/review report |
 | `cross_reference_unresolved` | Build reference resolution for a `standard` document | advisory | Build/review report; the unresolved row has no navigable target |
@@ -1679,7 +1916,7 @@ Every build should record:
 
 Runtime logs should support debugging retrieval without storing sensitive queries by default. `log_queries` and `log_evidence_text` are separate explicit options and both default to false; enabling query logging never enables evidence logging. Runtime logs and optional query telemetry are written to an operator-selected state directory outside immutable releases and outside `knowledge.sqlite`; release directories remain read-only. Logs use structured event types, redact paths and credentials before dispatch to any sink, and normally record only release ID, retrieval mode, stage timings, warning codes, and request correlation ID. Credentials and absolute/internal paths are never loggable even when either content option is enabled.
 
-Audit history has two explicitly bounded chains so an immutable release never claims to contain events that occur after it is sealed. The embedded build ledger is append-only, sequence-numbered, and hash-chained through completion of step 20, but contains only deterministic event data, `build_content_id`, phase sequence numbers, artifact hashes, and the explicit reproducible build epoch—never a random run ID or wall-clock observation. It is then sealed as `build-ledger.jsonl`, and its terminal hash is recorded in the release manifest. A separate operator lifecycle ledger outside the release directory records an operational run ID, actual build start/finish and failures, candidate assembly, manifest/checksum validation, smoke-test outcome, publication, active-pointer switch, rollback, and recovery with wall-clock times. That external chain begins with the operational run ID; when available it anchors `build_content_id`, after step 20 it anchors the terminal build-ledger hash, and after assembly it anchors `release_id` and the complete manifest digest. Every later entry links to its predecessor. Build, assembly, or activation failure can therefore be recorded without mutating candidate bytes, and “terminal” always names a declared chain cutoff rather than future events. Runtime diagnostic and optional query logs are not presented as either audit chain and need not share their retention policy.
+Audit history has two explicitly bounded chains so an immutable release never claims to contain events that occur after it is sealed. The embedded build ledger is append-only, sequence-numbered, and hash-chained through completion of step 21, but contains only deterministic event data, `build_content_id`, phase sequence numbers, artifact hashes, and the explicit reproducible build epoch—never a random run ID or wall-clock observation. It is then sealed as `build-ledger.jsonl`, and its terminal hash is recorded in the release manifest. A separate operator lifecycle ledger outside the release directory records an operational run ID, actual build start/finish and failures, candidate assembly, manifest/checksum validation, smoke-test outcome, publication, active-pointer switch, rollback, and recovery with wall-clock times. That external chain begins with the operational run ID; when available it anchors `build_content_id`, after step 21 it anchors the terminal build-ledger hash, and after assembly it anchors `release_id` and the complete manifest digest. Every later entry links to its predecessor. Build, assembly, or activation failure can therefore be recorded without mutating candidate bytes, and “terminal” always names a declared chain cutoff rather than future events. Runtime diagnostic and optional query logs are not presented as either audit chain and need not share their retention policy.
 
 ---
 
@@ -1696,6 +1933,7 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - query token detection;
 - rank fusion;
 - context expansion rules, including required empty arrays for false include flags and true flags with no matching relation, plus a multi-node source chunk whose every member contributes context under deterministic semantic deduplication and ordering;
+- Evidence Lineage schema closure and canonical ordering: exact source/manifest hashes and sizes, ordered multi-node and multi-page byte spans, coordinate-status derivation, selected parser roles and transformation hashes, chunk/source ownership, retrieval-artifact references, direct versus expanded selection roles, and unique independent context paths; reject missing or unknown fields, wrong ownership, a nonexistent artifact/edge/occurrence, unresolved-target traversal, duplicate paths, a direct-only item with a path, or a context-only item without one;
 - exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks and rejection of a candidate chunk containing any retrievable out-of-subtree member or members from two independently addressable branches;
 - rejection of duplicate source mappings, release-admitted chunks with no source, invalid/escaping source locators or mismatched source sizes, null or empty chunk `original_text`, incorrect deepest-common-ancestor citation nodes, invalid member spans or ordering, reconstructed-text mismatches, missing, overlapping, duplicate, gapped, out-of-order, or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the authoritative mapping projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases, including rejection of an existing but semantically wrong target node, code, edition, or document-root target; resolved rows compare parsed code and edition with joined targets, while unresolved rows retain parsed evidence with null target IDs/projections and perform no joined-field equality check;
@@ -1708,6 +1946,7 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - tier-specific cross-reference severity and release-gate selection;
 - per-artifact cache-key dependency selection, semantic manifest invalidation without raw-format over-invalidation, parser-neutral/report/canonical/page-provenance/chunk cache layering, adapter-provenance invalidation even when output bytes match, same-source manifests with different document identity never colliding, page-mapper invalidation, parser-role and comparison-configuration invalidation, and resolver-relevant target-catalogue invalidation without unrelated-document churn;
 - release checksum verification;
+- lineage release validation, including one record per catalog source; complete admitted-artifact references; deterministic invalidation for a changed source, manifest, parser route, transformation, index, schema, or assembly input; byte-identical reuse for unchanged inputs; and rejection of a missing, extra, truncated, unknown-version, checksum-invalid, or catalog-inconsistent `lineage.json`;
 - identifier and path-containment validation;
 - central response-field and diagnostic-detail allowlists, including path injection as an extra field and inside allowed structured and legacy string fields;
 - every Section 31 routing-table row and cancellation outcome;
@@ -1720,11 +1959,13 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - adversarial parser-isolation fixtures that attempt network access; reads outside the selected source/runtime/assets allowlist; writes outside the dedicated temporary directory; and CPU, memory, wall-time, output-file-size, and page-count overruns, with isolation-setup failure blocking before adapter execution;
 - mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete diagnostic parser-validation report before blocking, promote no failed report and construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that byte-for-byte promotes its report, selects the configured primary parser artifact, and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
+- end-to-end Evidence Lineage for one multi-channel direct result and one context-only result, including OCR and no-OCR documents, complete and page-only coordinates, an admitted below-threshold parser comparison, a chunk spanning several node/page mappings, several independent paths to one target, and an unresolved or absent target that emits a warning but never a navigable path;
 - a deliberately invalid catalog that fails at step 13 and invokes or caches no embedding, lexical-index, or vector-index builder while leaving the active release unchanged;
-- an evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the deterministic `build_content_id` and raw-result hash or failure record before step 19 blocks, while any operational run ID remains external and the active release remains unchanged;
+- an evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the deterministic `build_content_id` and raw-result hash or failure record before step 20 blocks, while any operational run ID remains external and the active release remains unchanged;
 - byte-stable `knowledge.sqlite` after the step 13 gate, with current-run results written only to the checksummed evaluation artifact and no later catalog mutation;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
+- startup loading and validation of `lineage.json`, followed by strict Evidence Package serialization that cannot expose a source locator, parser temporary path, configuration body, credential, exception text, random run ID, or wall-clock timestamp;
 - deterministic chunk-vector row mapping across multiple documents independent of SQLite insertion order; known scores must resolve to the intended chunk, source, and evidence under filters, while missing, duplicate, extra, shuffled, wrong-scope, wrong-row-order-version, wrong-shape, wrong-dtype, truncated, or checksum-invalid matrices are rejected and chunk identity/order/text, model/configuration, or row-order-version changes invalidate the embedding cache;
 - rejection of a lazy model with a changed, missing, extra, or pickle-backed weight artifact before loader invocation; a bounded controlled admitted set must prove pending tool/resource calls race to their quarantine surfaces, a cancellation that already won keeps its non-response outcome, no work request is admitted and no success commits after the transition, workers are reaped, cooperative writers flush all committed frames, a blocked writer forces exit at the shutdown bound with redacted undelivered-frame accounting, and restart fails until rollback or repair;
 - CLI search;
@@ -1737,8 +1978,9 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - candidate-release smoke tests before the active-pointer switch;
 - crash injection before temporary-file flush, immediately before replacement, after replacement but before the parent-directory flush, and after that flush; recovery must yield the complete old or new `active.json` before the final flush, must yield the new record after it, and must never expose a missing or torn record. Concurrent readers prove the same old-or-new property, and rollback passes the identical suite;
 - injected build and validation failures proving the active release is unchanged;
-- build-ledger sealing at the step 20 cutoff and external operator-lifecycle-ledger chaining for candidate validation, publication, pointer-switch failure, and rollback without modifying sealed release bytes;
+- build-ledger sealing at the step 21 cutoff and external operator-lifecycle-ledger chaining for candidate validation, publication, pointer-switch failure, and rollback without modifying sealed release bytes;
 - byte-identical release artifacts, deterministic `build_content_id`, and identical `release_id` across separate operational runs with the same explicit reproducible build epoch; a changed admitted artifact, assembly input, display label, or epoch must change `release_id`, while random run IDs and wall-clock timestamps appear only in external ledger events;
+- lineage continuity when an identical source filename is replaced with different bytes, indexes are regenerated with changed or byte-identical inputs, and the active pointer rolls forward and back; every Evidence Package must use only the source, lineage, catalog, and retrieval artifacts from its single active release;
 - adversarial static-report rendering with HTML, SVG, URL, CSS, and script sentinels in every untrusted field, verifying inert display, the restrictive offline CSP, and zero external requests;
 - OS-read-only release operation and query logging that leaves every release byte unchanged;
 - log-sink tests injecting credential, absolute-path, query, evidence-text, and client-controlled JSON-RPC-ID sentinels through successes, failures, saturation, and blocked quarantine flushes, proving credentials, paths, and client IDs never appear in any sink; query/evidence text is absent by default, explicit opt-in affects only its documented fields, undelivered frames use only server-generated correlation IDs, and redaction occurs before every configured sink;
@@ -1749,7 +1991,7 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - parser snapshots for representative documents;
 - expected clause trees;
 - expected table structures;
-- citation and warning outputs;
+- citation, Evidence Lineage, uncertainty, and warning outputs, including `source_coordinate_incomplete`, `ocr_low_confidence`, and `parser_comparison_difference` propagation and deterministic top-level deduplication;
 - protocol error, tool execution error, empty-evidence success, and path-redaction outputs;
 
 ### 34.4 Packaging tests
