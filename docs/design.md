@@ -381,10 +381,10 @@ superseded_by: null
 reference_edition_overrides: {}
 language: en
 source_file: corpus/originals/AS1668.1-2015.pdf
-sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+sha256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-Manifest YAML must be loaded with a safe loader that rejects custom tags, then validated against a versioned schema with unknown fields rejected. Registration calculates the source SHA-256 before human approval; `sha256` is mandatory and non-null for any manifest admitted to a build. Approval records the canonical manifest-content hash, and the builder must reject or re-review a manifest whose bytes change between approval and ingestion.
+Manifest YAML must be loaded with a safe loader that rejects custom tags, then validated against a versioned schema with unknown fields rejected. SHA-256 values use the canonical string form `sha256:` followed by exactly 64 lowercase hexadecimal characters; bare digests, uppercase characters, and surrounding whitespace are invalid. The non-zero value above is illustrative and registration must replace it with the digest calculated from the selected source bytes before human approval. `sha256` is mandatory and non-null for any manifest admitted to a build. Approval records the canonical manifest-content hash, and the builder must reject or re-review a manifest whose bytes change between approval and ingestion.
 
 `release_tier` is either `critical` or `standard`. A critical document is one whose omission or structurally incorrect parsing can invalidate a release; it is subject to the dual-parser and release-blocking rules in Section 11.3.
 
@@ -441,7 +441,7 @@ Every parser adapter must produce a parser-neutral intermediate representation c
 
 ### 11.3 Parser validation
 
-The builder should test:
+The builder must test:
 
 - source and parsed page counts;
 - missing-text ratios;
@@ -454,7 +454,11 @@ The builder should test:
 - unresolved page coordinates;
 - differences between two parser outputs when comparison mode is enabled.
 
-A critical document that fails configured quality thresholds must not enter a production release.
+Comparison mode is mandatory for every `critical` document and optional for a `standard` document. A critical document must be parsed independently by two configured adapters backed by distinct parser implementations; running one implementation twice or changing only its options does not satisfy this rule. Neither adapter's output becomes canonical until the comparison gate passes.
+
+For a critical document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds its configured threshold. The static review report must show both outputs and every disagreement. A blocked document may proceed only after correcting the parser, source, or manifest and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
+
+A critical document that fails either single-parser quality thresholds or the dual-parser comparison gate must not enter a production release.
 
 ---
 
@@ -596,15 +600,17 @@ SQLite is the source of truth for structured knowledge-base metadata.
 
 Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints must encode the canonical invariants rather than relying only on application code. The initial schema requires at least:
 
+`node_id`, `chunk_id`, `source_id`, and `cross_reference_id` are globally unique within a catalog release and remain stable across deterministic rebuilds of unchanged inputs. The apparently redundant unique pairs `(document_id, node_id)` and `(document_id, chunk_id)` are ownership candidate keys: dependent tables and self-relations reference those pairs so SQLite proves that an otherwise global node or chunk ID belongs to the accompanying document.
+
 | Table | Required constraints |
 | --- | --- |
 | `documents` | `document_id` primary key; `document_code`, `edition`, `manifest_content_hash`, and `source_file_hash` `NOT NULL`; unique `(document_code, edition)`. |
-| `nodes` | `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique `(document_id, node_id)` and `(document_id, canonical_order)`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for roots or sequence boundaries; non-null values are same-document self-foreign keys with `ON DELETE RESTRICT`. |
-| `chunks` | `chunk_id` primary key; `document_id`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; non-null values are same-document self-foreign keys with `ON DELETE RESTRICT`. |
-| `chunk_nodes` | `chunk_id` and `node_id` `NOT NULL`; foreign keys to `chunks` and `nodes`; composite primary key `(chunk_id, node_id)`; a trigger or deferred validation rejects cross-document membership. |
+| `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for roots or sequence boundaries; each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
+| `chunks` | Globally unique `chunk_id` primary key; `document_id`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
+| `chunk_nodes` | `document_id`, `chunk_id`, and `node_id` `NOT NULL`; composite primary key `(chunk_id, node_id)`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
 | `document_jurisdictions` and `document_disciplines` | Both columns `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
-| `sources` | `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; foreign keys to `documents` and `chunks`; page span check enforces positive ordered pages. |
-| `cross_references` | `cross_reference_id` primary key; source node and document IDs, relation type, raw text, and resolution status `NOT NULL`; source foreign keys enforced; `resolved` rows require target document and node foreign keys plus a target-node/document consistency check, while unresolved rows forbid a dangling target node. |
+| `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; page span check enforces positive ordered pages. |
+| `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, and resolution status `NOT NULL`; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. `source_edition` and resolved `target_edition` are derived from the joined document records rather than independently writable values. |
 
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
@@ -854,6 +860,13 @@ raw_reference_text
 Multiple eligible documents produce `ambiguous_edition`; no eligible document produces `unresolved_document`; and an eligible document without the referenced clause produces `unresolved_clause`. None of these conditions may silently select the newest or active edition. The manifest schema defines `reference_edition_overrides` as a mapping from normalized external document code to an immutable target `document_id`; it is covered by manifest approval and release validation.
 
 The initial `resolution_status` enum is `resolved`, `unresolved_document`, `ambiguous_edition`, and `unresolved_clause`. Same-document references inherit the source `document_id`. `resolved` requires both target IDs, and the target node must belong to the resolved target document.
+
+Release policy is tier-specific and has no count threshold in v0.1:
+
+- for a `critical` document, every extracted cross-reference row must be `resolved`; any `unresolved_document`, `ambiguous_edition`, or `unresolved_clause` status emits a blocking `cross_reference_unresolved`, fails release validation, and requires a manifest correction, parser/resolver correction, or re-approved change of release tier before rebuilding;
+- for a `standard` document, a non-resolved status emits an advisory `cross_reference_unresolved` and may ship only when the static review report enumerates it and the unresolved row exposes no navigable target IDs.
+
+The release summary records unresolved counts by document, tier, status, and relation type. Runtime context expansion never follows an unresolved row.
 
 Human-reviewed manifest fields are authoritative for `supersedes` and `superseded_by`. An extracted supersession statement is stored as evidence and proposed metadata, but it does not overwrite the manifest. Any disagreement emits `edition_conflict` and blocks a critical document until reviewed.
 
@@ -1433,7 +1446,8 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `ocr_low_confidence` | Parse OCR quality review | advisory | Build/review report |
 | `clause_sequence_anomaly` | Parse structural validation | advisory | Build/review report |
 | `table_structure_anomaly` | Parse structural validation | advisory | Build/review report |
-| `cross_reference_unresolved` | Build reference resolution | advisory | Build/review report; release policy separately fails a critical document |
+| `cross_reference_unresolved` | Build reference resolution for a `standard` document | advisory | Build/review report; the unresolved row has no navigable target |
+| `cross_reference_unresolved` | Release validation for any non-resolved row in a `critical` document | blocking | Release report and non-zero builder exit |
 | `edition_conflict` | Build extracted-versus-manifest reconciliation | blocking | Build/review report |
 | `document_status_unknown` | Manifest registration | blocking | Build/review report |
 | `applicability_incomplete` | Runtime evidence assembly | advisory | In-band warning on a successful tool result |
@@ -1492,7 +1506,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 
 ### 34.1 Unit tests
 
-- manifest validation;
+- manifest validation, including canonical `sha256:<64-lowercase-hex>` form and rejection of placeholders that do not match the selected source;
 - canonical model validation;
 - text normalization;
 - clause-number parsing;
@@ -1502,7 +1516,9 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - rank fusion;
 - context expansion rules;
 - cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases;
+- global identifier scope, ownership-preserving composite foreign keys, and rejection of cross-document source/chunk and source-node/document pairs;
 - target-node/document consistency and every `resolution_status` constraint;
+- tier-specific cross-reference severity and release-gate selection;
 - per-artifact cache-key dependency selection and target-catalogue invalidation;
 - release checksum verification;
 - identifier and path-containment validation;
@@ -1512,6 +1528,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 ### 34.2 Integration tests
 
 - parser adapter to canonical model;
+- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that leave the active release unchanged;
 - end-to-end build of a public sample document;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
@@ -1522,6 +1539,7 @@ Build and release audit events are append-only, sequence-numbered, and hash-chai
 - MCP compatibility for `2026-07-28` and `2025-11-25`, including structured output, pagination, `-32602` versus `-32002` resource misses, `-32603` external-original integrity failures, no empty-content fallback, and no tool response after honored cancellation;
 - indexed query plans for exact clause, jurisdiction, discipline, status, and document-type filters;
 - a target-edition catalogue change that invalidates cross-references and release assembly while an unrelated parse cache remains valid;
+- a standard document with an unresolved reference that ships only with an advisory and no target IDs, contrasted with a critical document whose same unresolved status blocks publication;
 - candidate-release smoke tests before the active-pointer switch;
 - injected build and validation failures proving the active release is unchanged;
 - OS-read-only release operation and query logging that leaves every release byte unchanged;
