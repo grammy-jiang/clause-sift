@@ -14,7 +14,7 @@ Phase 3 adds evaluated semantic retrieval to ClauseSift without changing the aut
 The Phase 3 implementation must deliver:
 
 1. a replaceable embedding-provider contract;
-2. an evidence-backed embedding-model selection process;
+2. an evidence-backed embedding-model **and model-specific query-preprocessing projection** selection process;
 3. exactly one deterministic release embedding for every persisted chunk;
 4. a safe memory-mapped exact dense-search implementation;
 5. deterministic lexical+dense reciprocal-rank fusion (RRF);
@@ -55,8 +55,9 @@ Phase 3 implements and validates:
 
 - embedding-provider interface and safe provider implementation;
 - deterministic `embedding_text` projection;
+- deterministic query-preprocessing framework with candidate-specific model projections;
 - multilingual/cross-language engineering embedding benchmark;
-- model selection and immutable decision record;
+- joint model + model-specific preprocessing selection and immutable decision record;
 - one vector per persisted chunk;
 - fixed v0.1 `embeddings.f16.npy` release artifact;
 - deterministic vector row ordering;
@@ -68,8 +69,7 @@ Phase 3 implements and validates:
 - supervised/lazy query-model loading through the common runtime lifecycle;
 - lexical+dense deduplication by canonical evidence identity;
 - deterministic RRF;
-- deterministic query preprocessing and feature extraction;
-- deterministic query classification/path resolution;
+- deterministic query analysis and retrieval-path classification;
 - Phase 3-specific held-out campaign governance;
 - Phase 3 cache, release, model-asset, and lineage identity;
 - comparative lexical/dense/hybrid regression evaluation;
@@ -121,8 +121,10 @@ The implementation must preserve all of the following.
 18. Request-specific ranks/scores/fusion/context paths are runtime assembly lineage, not release mutation.
 19. All normal work remains bounded, cancelable, deadline-aware, and subject to the common runtime admission/quarantine contract.
 20. Quality gates precede performance optimization.
-21. The exact production query-preprocessing identity is frozen and implemented before embedding-model or RRF selection begins; changing it invalidates those selection reports.
-22. Phase 3 release gates are evaluated on the final frozen user-facing Phase 3 retrieval paths, never satisfied by substituting a diagnostic dense-only or lower-phase lexical result.
+21. The generic query-preprocessing **schema/framework and candidate-construction rules** are frozen before model selection; for each embedding candidate, its complete model-specific query-preprocessing projection—including required prefixes, templates, and query/document role markers—is frozen **before that candidate is benchmarked**.
+22. Model selection selects a `(model/provider/assets/configuration, candidate-specific preprocessing projection)` pair, not a model in isolation.
+23. The winning candidate's already-evaluated preprocessing projection is carried byte-for-byte/identity-for-identity into RRF selection, final confirmation, and production; changing it invalidates both model- and RRF-selection evidence.
+24. Phase 3 release gates are evaluated on the final frozen user-facing Phase 3 retrieval paths, never satisfied by substituting a diagnostic dense-only or lower-phase lexical result.
 
 ## 5. Deliverables
 
@@ -130,8 +132,9 @@ The implementation must preserve all of the following.
 
 - embedding provider abstraction;
 - deterministic embedding-text builder;
+- query-preprocessing framework and candidate-specific projection builder;
 - embedding benchmark harness and report;
-- selected-model decision artifact;
+- selected model + preprocessing projection decision artifact;
 - chunk embedding builder;
 - deterministic vector row-map validator;
 - `embeddings.f16.npy`;
@@ -146,7 +149,7 @@ The implementation must preserve all of the following.
 
 After the Phase 2 corrective prerequisite exists:
 
-- query preprocessing service;
+- query preprocessing service using the selected winning projection;
 - lazy query embedder;
 - exact dense index/search backend;
 - dense-hit mapper;
@@ -165,12 +168,13 @@ Retain versioned records of:
 
 - all embedding candidates evaluated;
 - exact model/provider revisions and assets;
+- each candidate's complete model-specific query-preprocessing projection identity;
 - benchmark corpus/split identities;
 - benchmark configuration;
 - per-stratum metrics;
-- selected and rejected candidates with rationale;
+- selected and rejected model+preprocessing pairs with rationale;
 - candidate-pool and RRF configurations;
-- query-preprocessing identity;
+- winning query-preprocessing identity;
 - query-classifier identity;
 - Phase 3 held-out campaign preregistration and results;
 - final release-gate decision.
@@ -192,6 +196,7 @@ src/clausesift/
 │       ├── rowmap.py
 │       └── validate.py
 ├── retrieval/
+│   ├── preprocessing.py
 │   ├── dense.py
 │   ├── fusion.py
 │   ├── query_analysis.py
@@ -209,21 +214,22 @@ src/clausesift/
 
 Builder code owns document-dependent embeddings. Runtime code owns only the current-query embedding. Dense backends return typed candidates, never backend-native objects to public interfaces.
 
-## 7. Work package A — Freeze Phase 3 contracts
+## 7. Work package A — Freeze Phase 3 contracts and preprocessing framework
 
-Before selecting a model, define strict versioned contracts for:
+Before benchmarking any embedding candidate, define strict versioned contracts for:
 
 - embedding provider metadata;
 - `embedding_text` projection;
 - vector row ordering;
 - dense candidate records;
 - fusion candidate records;
-- query preprocessing;
+- query-preprocessing schema/framework;
+- model-specific preprocessing projection construction;
 - query analysis/classification;
 - Phase 3 held-out campaign ledger;
 - Phase 3 release/cache/lineage dependencies.
 
-The **production query-preprocessing contract is implemented and frozen at this stage**, before model/RRF selection. Query analysis/classification may be implemented later, but the byte transformation that feeds query embedding and any model/RRF selection harness cannot be provisional after selection starts.
+Implement the deterministic preprocessing framework before model selection. The framework must support the model-specific fields required by `phase-3-query-preprocessing-identity.md`, including candidate-required query prefixes/instructions/templates and query/document role markers. **It does not freeze one global prefix/template before candidate identity is known.** Instead, once a candidate's model/provider identity is known, the harness instantiates and freezes that candidate's complete projection before evaluating the candidate.
 
 ### 7.1 Embedding provider
 
@@ -242,7 +248,24 @@ The provider contract must expose enough deterministic metadata to bind build an
 
 Model-native objects stay inside the provider implementation.
 
-### 7.2 Dense candidate
+### 7.2 Candidate-specific preprocessing projection
+
+For every embedding candidate, construct a strict versioned preprocessing projection that includes all behavior-bearing query transformation inputs required by that candidate, including as applicable:
+
+- Unicode normalization;
+- trim/whitespace policy;
+- query prefix/instruction;
+- query template;
+- query role marker;
+- corresponding document role marker or embedding-text role convention where the model requires paired roles;
+- separator/control-token policy where explicitly supported by the selected tokenizer/model contract;
+- identifier/number/unit preservation rules;
+- normalized-query construction version;
+- complete configuration hash.
+
+The candidate projection is frozen before the first model-selection query is embedded. A benchmark record without that identity is invalid.
+
+### 7.3 Dense candidate
 
 A dense candidate resolves to existing lower-phase identity and carries only retrieval metadata:
 
@@ -256,7 +279,7 @@ A dense candidate resolves to existing lower-phase identity and carries only ret
 
 The row index is not a public evidence ID.
 
-### 7.3 Fusion candidate
+### 7.4 Fusion candidate
 
 A fused candidate contains:
 
@@ -296,15 +319,25 @@ Freeze:
 - Unicode normalization behavior;
 - deterministic field ordering.
 
+If a candidate model requires document-role markers or document-side templates, those are represented through the candidate's frozen preprocessing/embedding configuration and included in the complete candidate identity; they cannot be introduced after the candidate has been evaluated.
+
 Cache identity uses the design-defined ordered chunk tuple `(document_id, canonical_order, chunk_id, embedding_text_hash)` plus the complete Section 25 dependency set.
 
 Tests must prove stable bytes, correct invalidation, edition separation, and no unrelated-document over-invalidation beyond the declared dependency graph.
 
-## 9. Work package C — Embedding benchmark
+## 9. Work package C — Joint model + preprocessing benchmark
 
-No model is selected by popularity or generic benchmark reputation.
+No model is selected by popularity or generic benchmark reputation, and no preprocessing projection is chosen after seeing a model's final result.
 
-**Every benchmark query passes through the already frozen production query-preprocessing implementation and records its exact preprocessing identity.** A model-selection report produced with another preprocessing identity is not reusable.
+The benchmark unit is a **fully specified candidate pair**:
+
+```text
+(model/provider/assets/configuration,
+ complete model-specific query preprocessing projection,
+ document-side role/projection configuration where applicable)
+```
+
+Each pair is frozen before it is benchmarked.
 
 ### 9.1 Candidate shortlist
 
@@ -317,6 +350,8 @@ Benchmark a small replaceable set that can realistically support:
 - fire-safety terminology;
 - short clauses;
 - longer contextual chunks.
+
+A model may have one or more preregistered candidate projections only when each projection is fixed before evaluation; do not iteratively tune a prefix/template against held-out results.
 
 ### 9.2 Required strata
 
@@ -342,24 +377,28 @@ Include at minimum:
 
 ### 9.3 Protocol
 
-For each candidate:
+For each candidate pair:
 
-1. freeze model/provider/asset/configuration identity;
-2. use the frozen production query-preprocessing implementation/identity for every benchmark query;
-3. embed the same immutable benchmark chunk set;
-4. verify deterministic row mapping;
-5. verify canonical release-byte reproducibility under the admitted build environment;
-6. run exact dense search;
-7. measure Recall@5 and Recall@20 plus secondary ranking diagnostics;
-8. report every required stratum;
-9. measure build throughput and artifact size;
-10. measure cold load, warm query embedding, and dense search separately;
-11. measure peak RSS;
-12. retain rejected candidate results.
+1. freeze provider/model/revision/assets/configuration identity;
+2. freeze the complete candidate-specific query preprocessing projection before any benchmark query is embedded;
+3. freeze corresponding document-side role/projection configuration where the model requires it;
+4. embed the same immutable benchmark chunk set using that candidate's complete document-side configuration;
+5. preprocess every benchmark query with that candidate's frozen query projection;
+6. verify deterministic row mapping;
+7. verify canonical release-byte reproducibility under the admitted build environment;
+8. run exact dense search;
+9. measure Recall@5 and Recall@20 plus secondary ranking diagnostics;
+10. report every required stratum;
+11. measure build throughput and artifact size;
+12. measure cold load, warm query embedding, and dense search separately;
+13. measure peak RSS;
+14. retain rejected candidate-pair results.
+
+Selection chooses the best evidence-backed **pair**, not a model followed by a later preprocessing choice.
 
 Selection priority is retrieval correctness, hard-negative/cross-language robustness, reproducibility/safe loading, runtime feasibility, then speed/packaging simplicity.
 
-Any behavior-bearing preprocessing change after selection invalidates the model-selection evidence and requires rerunning model selection before the changed candidate can progress.
+The winning pair's preprocessing projection becomes the production projection unchanged. A later behavior-bearing change creates a new candidate and invalidates the prior model-selection evidence.
 
 ## 10. Work package D — Offline embedding artifact
 
@@ -405,8 +444,9 @@ Bind at minimum:
 - dtype;
 - normalization;
 - row-order version;
-- model/provider identity;
+- selected model/provider identity;
 - complete model-asset identity;
+- winning query/document preprocessing projection identities;
 - embedding configuration;
 - embedding-text version;
 - artifact schema version.
@@ -438,6 +478,7 @@ Validate:
 - read-only behavior;
 - supported schema/model/provider identity;
 - complete model asset binding;
+- winning preprocessing projection identity;
 - query-independent lineage artifact identity.
 
 Any mismatch blocks activation.
@@ -454,6 +495,7 @@ Before scoring:
 - values are finite;
 - normalization contract holds;
 - query model/provider/assets/configuration exactly match release identity;
+- query preprocessing identity exactly matches the winning release-bound candidate projection;
 - zero-norm vectors fail visibly.
 
 ### 12.2 Deterministic top-K
@@ -474,13 +516,13 @@ Semantic similarity never substitutes document/edition/jurisdiction/status/type 
 
 A vector row that cannot map one-to-one to catalog identity is a release-integrity failure, not a skippable hit.
 
-## 13. Work package G — Query preprocessing and embedding
+## 13. Work package G — Production query embedding
 
 Only the current query is embedded at runtime.
 
-The **production query-preprocessing implementation was already frozen before model selection** under Work package A. This work package integrates that exact implementation into runtime query embedding; it does not define or retune it after model/RRF selection.
+Runtime uses the **winning candidate pair's already-evaluated query-preprocessing projection unchanged**. This work package integrates that frozen projection into the query-embedding runtime; it does not define or retune prefixes, templates, role markers, normalization, or query construction.
 
-Query preprocessing is deterministic and release-bound. It must not silently:
+Query preprocessing remains deterministic and release-bound. It must not silently:
 
 - remove negation;
 - drop numbers/units;
@@ -519,7 +561,7 @@ Benchmark bounded candidates for:
 - `rrf_k`;
 - channel weighting only if explicitly admitted and evidence shows plain RRF is insufficient.
 
-RRF/candidate-pool selection uses the same already-frozen production query-preprocessing identity used by model selection. A preprocessing change invalidates the RRF-selection report as well as the model-selection report.
+RRF/candidate-pool selection uses the **winning model+preprocessing pair** unchanged. Any change to the winning preprocessing projection invalidates both the model-selection and RRF-selection evidence and requires a new candidate/selection cycle.
 
 ### 14.3 Deterministic ordering
 
@@ -570,7 +612,7 @@ Keep distinct:
 Before final confirmation, persist:
 
 - campaign ID;
-- complete frozen candidate identity hash;
+- complete frozen candidate identity hash, including the winning model-specific preprocessing projection;
 - gate families/strata;
 - sample-size rules;
 - final split identity/hash;
@@ -601,7 +643,7 @@ Tests cover all failure/replay/rotation boundaries, including query-preprocessin
 
 The Phase 3 Wilson gates are **not generic metrics that any retrieval slice may satisfy**. They are release-authorizing gates for the frozen user-facing Phase 3 paths.
 
-For independently labelled applicable cases, the **final frozen classifier-selected production path**—including the exact production query preprocessing, deterministic query analysis/classification, whichever exact/lexical/dense channels it resolves, RRF where selected, metadata filters, and the inherited lower-phase evidence pipeline—must satisfy:
+For independently labelled applicable cases, the **final frozen classifier-selected production path**—including the winning model-specific query preprocessing, deterministic query analysis/classification, whichever exact/lexical/dense channels it resolves, RRF where selected, metadata filters, and the inherited lower-phase evidence pipeline—must satisfy:
 
 - Recall@20 one-sided 95% Wilson lower bound >= 98%;
 - Top-5 one-sided 95% Wilson lower bound >= 95%.
@@ -654,8 +696,8 @@ Vector invalidation includes embedding artifact hash, backend/version, metric/co
 
 Phase 3 release/build identity additionally binds behavior-bearing:
 
+- winning model-specific query/document preprocessing projection identities;
 - RRF configuration;
-- query-preprocessing identity;
 - query-analysis/classifier identity;
 - candidate-pool configuration;
 - Phase 3 gate-result identities.
@@ -672,12 +714,12 @@ Phase 3 adds as applicable:
 
 - embedding-text transformation identity;
 - embedding provider/model/revision/configuration and bound assets;
+- winning query/document preprocessing projection identities;
 - embedding artifact hash;
 - vector backend/metric/configuration;
 - vector artifact hash/exact-backend declaration;
 - lexical-index artifact identity;
 - RRF configuration identity when release-bound;
-- query-preprocessing identity when release-bound;
 - query-analysis/classifier configuration identity when release-bound.
 
 It must not contain query text, request IDs, candidate ranks/scores, fusion results, selected seed sets, or query-specific context paths.
@@ -720,13 +762,14 @@ Explicit hybrid requests fail visibly for missing/incompatible dense artifacts, 
 
 Require:
 
+- deterministic candidate-specific preprocessing projection construction;
 - deterministic row map;
 - byte-identical canonical `embeddings.f16.npy` for the same complete admitted build identity;
 - stable dense ranking;
 - stable RRF ordering;
 - stable classifier output;
 - stable release validation decision;
-- rollback restores matching catalog/vector/model/configuration/lineage state.
+- rollback restores matching catalog/vector/model/preprocessing/configuration/lineage state.
 
 ### 21.2 Security/privacy
 
@@ -755,7 +798,10 @@ Do not introduce ANN merely because a synthetic larger corpus is slower; record 
 Test:
 
 - embedding-text determinism;
-- production query-preprocessing determinism before model/RRF selection;
+- preprocessing-framework determinism;
+- model-specific prefix/template/query-role/document-role projection determinism;
+- candidate projection frozen before first candidate evaluation;
+- winning projection copied unchanged into RRF and runtime;
 - model/provider/asset identity;
 - row order;
 - float16 conversion;
@@ -779,7 +825,7 @@ After the corrected Phase 2 prerequisite exists, test:
 - complete Phase 3 release build;
 - repeated byte-identical embedding build;
 - fresh-process read-only mmap;
-- cold/warm query model behavior;
+- cold/warm query model behavior with the winning preprocessing projection;
 - exact mode remains model-free;
 - hybrid retrieval through the shared evidence pipeline;
 - wrong-edition hard negatives;
@@ -810,38 +856,42 @@ Include:
 - observed confirmation split reused by changed candidate;
 - second decisive final confirmation in one campaign;
 - reproduction-only replay incorrectly treated as new release evidence;
-- changed preprocessing identity with stale model/RRF selection report;
+- candidate benchmark run before its model-specific preprocessing projection is frozen;
+- winning projection changed after model selection;
+- winning projection changed after RRF selection;
 - final classifier-selected path failing while dense-only passes;
 - explicit hybrid path failing while another evaluated slice passes.
 
 ## 23. Implementation sequence
 
 1. Merge/validate the separate Phase 2 corrective prerequisite before release-capable Phase 3 integration or final confirmation.
-2. Freeze Phase 3 schemas/interfaces, including the complete production query-preprocessing schema/rules/configuration and test fixtures.
-3. Implement and freeze the deterministic production query-preprocessing path; record its identity and make the same implementation available to benchmark harnesses.
-4. Implement deterministic `embedding_text` projection.
-5. Implement embedding-provider and model-asset identity.
-6. Build the embedding benchmark harness around the frozen production preprocessing path.
-7. Benchmark/select/freeze the embedding model on selection data using that exact preprocessing identity.
-8. Build canonical chunk embeddings.
-9. Build/validate deterministic row map.
-10. Implement bounded safe artifact loader.
-11. Implement exact dense backend and canonical hit mapping.
-12. Implement lazy current-query embedding by integrating the already frozen production preprocessing path.
-13. Implement lexical+dense deduplication and RRF.
-14. Benchmark candidate pools/RRF on selection data using the same frozen production preprocessing identity; any preprocessing change invalidates both model and RRF selection and returns to step 3.
-15. Implement deterministic query analysis/classification on top of the already frozen preprocessing path.
-16. Integrate classifier-selected/hybrid seeds with the corrected Phase 2 evidence service.
-17. Implement Section 25 invalidation and Phase 3 release identity.
-18. Implement query-independent lineage additions and closed-schema runtime provenance.
-19. Add unit/integration/negative/reproducibility/security tests.
-20. Add comparative retrieval and downstream evidence-semantics evaluation.
-21. Freeze the complete final production candidate identity, including preprocessing, model, dense backend, candidate pools, RRF, and classifier configuration.
-22. Preregister the Phase 3 campaign and the separately named classifier-selected and explicit-hybrid blocking gate families/final confirmation cases.
-23. Run the single final decisive confirmation; both the final classifier-selected production path and explicit-hybrid path must meet their applicable Section 17.1 gates.
-24. Produce final benchmark/gate/performance/release reports.
-25. Validate activation and rollback.
-26. Record Phase 4 handoff without implementing Phase 4.
+2. Freeze Phase 3 schemas/interfaces, including the generic query-preprocessing schema/framework and the complete set of model-specific projection fields that candidate identities may require.
+3. Implement the deterministic preprocessing framework and candidate-projection builder; do not yet choose one global model-specific prefix/template.
+4. Implement deterministic `embedding_text` projection and document-side role/projection support.
+5. Implement embedding-provider/model/model-asset identity so candidate-specific preprocessing requirements are knowable.
+6. Build the benchmark harness around the deterministic preprocessing framework.
+7. For every embedding candidate, instantiate and **freeze that candidate's complete model-specific query/document preprocessing projection before the candidate is benchmarked**.
+8. Benchmark the frozen candidate pairs `(model/provider/assets/configuration, preprocessing projection)` on model-selection data.
+9. Select and freeze the winning model+preprocessing pair; the winning projection becomes the production projection unchanged.
+10. Build canonical chunk embeddings using the winning pair's document-side configuration.
+11. Build/validate deterministic row map.
+12. Implement bounded safe artifact loader.
+13. Implement exact dense backend and canonical hit mapping.
+14. Implement runtime current-query embedding using the winning pair's already-evaluated query preprocessing projection unchanged.
+15. Implement lexical+dense deduplication and RRF.
+16. Benchmark candidate pools/RRF on selection data using the winning model+preprocessing pair unchanged; any preprocessing change creates a new candidate and returns to step 7.
+17. Implement deterministic query analysis/classification on top of the winning frozen preprocessing path.
+18. Integrate classifier-selected/hybrid seeds with the corrected Phase 2 evidence service.
+19. Implement Section 25 invalidation and Phase 3 release identity.
+20. Implement query-independent lineage additions and closed-schema runtime provenance.
+21. Add unit/integration/negative/reproducibility/security tests.
+22. Add comparative retrieval and downstream evidence-semantics evaluation.
+23. Freeze the complete final production candidate identity, including the winning preprocessing projection, model, dense backend, candidate pools, RRF, and classifier configuration.
+24. Preregister the Phase 3 campaign and the separately named classifier-selected and explicit-hybrid blocking gate families/final confirmation cases.
+25. Run the single final decisive confirmation; both the final classifier-selected production path and explicit-hybrid path must meet their applicable Section 17.1 gates.
+26. Produce final benchmark/gate/performance/release reports.
+27. Validate activation and rollback.
+28. Record Phase 4 handoff without implementing Phase 4.
 
 ## 24. Acceptance criteria
 
@@ -849,18 +899,18 @@ Phase 3 is complete only when:
 
 1. the separate Phase 2 corrective prerequisite is merged and validated;
 2. the embedding provider is replaceable and model-native objects do not leak into canonical/public contracts;
-3. the production query-preprocessing path is implemented/frozen before model or RRF selection and is identical between selection, final confirmation, and runtime;
-4. model selection is supported by project-specific multilingual/hard-negative evidence bound to that exact preprocessing identity;
-5. every persisted chunk has exactly one vector and no non-chunk vector rows exist;
-6. vector row order is exactly the versioned canonical order and independently reconstructable;
-7. the v0.1 artifact is exactly safe read-only `float16` `embeddings.f16.npy` with bounded header/pickle-disabled loading;
-8. complete model/provider/asset identity is bound into build/release/runtime compatibility;
-9. deterministic query preprocessing is release-bound and included in frozen candidate identity;
+3. the generic preprocessing framework/schema is implemented before candidate evaluation, and **each candidate's complete model-specific preprocessing projection is frozen before that candidate is benchmarked**;
+4. model selection is joint selection of a model/provider/assets/configuration plus its frozen preprocessing projection, supported by project-specific multilingual/hard-negative evidence;
+5. the winning preprocessing projection is carried unchanged into RRF selection, final confirmation, and runtime; any behavior-bearing change invalidates prior model/RRF selection evidence;
+6. every persisted chunk has exactly one vector and no non-chunk vector rows exist;
+7. vector row order is exactly the versioned canonical order and independently reconstructable;
+8. the v0.1 artifact is exactly safe read-only `float16` `embeddings.f16.npy` with bounded header/pickle-disabled loading;
+9. complete model/provider/asset and winning preprocessing identities are bound into build/release/runtime compatibility;
 10. identical complete build identity produces byte-identical canonical embedding bytes/hash;
 11. exact dense search and top-K ordering are deterministic;
 12. dense hits map one-to-one to canonical lower-phase identity;
 13. metadata/edition safety is preserved;
-14. RRF is versioned, benchmark-selected, deterministic, canonical-ID based, and selected using the same frozen production preprocessing identity;
+14. RRF is versioned, benchmark-selected, deterministic, canonical-ID based, and selected using the winning model+preprocessing pair unchanged;
 15. query analysis/classification is deterministic and non-LLM;
 16. exact-style queries retain exact/lexical protections;
 17. natural-language queries execute the hybrid path when capability exists;
@@ -886,14 +936,15 @@ Phase 3 is complete only when:
 
 The merged plan requires the implementation to produce:
 
-- frozen production query-preprocessing identity and implementation evidence;
-- selected model/provider/asset decision record;
-- embedding benchmark report bound to that preprocessing identity;
+- preprocessing framework/schema identity;
+- every evaluated model candidate's frozen preprocessing projection identity;
+- selected winning model/provider/assets + preprocessing projection decision record;
+- embedding benchmark report bound to each candidate pair;
 - embedding-text identity;
 - canonical embedding artifact metadata/hash;
 - row-map identity;
 - dense backend/metric identity;
-- RRF identity and selection report bound to the same preprocessing identity;
+- RRF identity and selection report bound to the winning preprocessing projection;
 - query-analysis/classifier identity;
 - Section 25 cache/build identities;
 - query-independent Phase 3 lineage update;
@@ -912,12 +963,12 @@ After the corrected Phase 2 prerequisite and Phase 3 gates are satisfied, Phase 
 - exact/lexical retrieval intact;
 - dense chunk retrieval;
 - lexical+dense RRF;
-- deterministic query preprocessing/analysis/classification;
+- deterministic selected query preprocessing/analysis/classification;
 - closed-schema retrieval provenance;
 - ordinary Phase 2 required-context/material-conflict closure;
 - strict ordinary Evidence Package behavior;
 - immutable embedding/vector artifacts;
-- release-bound model/configuration identity;
+- release-bound model/configuration/preprocessing identity;
 - expanded evaluation evidence.
 
 Phase 4 then adds only the high-accuracy work assigned by current `docs/design.md`:
