@@ -3,539 +3,203 @@
 **Project:** ClauseSift  
 **Phase:** 2 — Exact Retrieval MVP  
 **Status:** Normative current-design corrective implementation plan  
-**Primary design authority:** `docs/design.md` Sections 7.2, 17, 19-22, 26-27, 29, 31, and 35  
-**Companions:** `phase-2-required-context-closure.md`, `phase-2-material-conflict-closure.md`
+**Primary design authority:** `docs/design.md` Sections 7.2, 17, 19-22, 26-27, 29, and 31  
+**Companions:** `phase-2-required-context-closure.md`, `phase-2-material-conflict-closure.md`, `phase-2-mcp-wire-resources.md`
 
 ## 1. Purpose
 
-Current `docs/design.md` requires Phase 2 to provide the ordinary context-complete exact/lexical evidence path and the basic Python, CLI, and MCP retrieval interfaces that expose it.
+Current `docs/design.md` assigns Phase 2 the ordinary context-complete exact/lexical evidence path. Phase 2 therefore owns one shared service that takes exact/lexical direct seeds through required graph closure, material-conflict fixed-point closure, strict Evidence Package serialization, and Python/CLI/MCP projection.
 
-The already merged Phase 2 plan predates that boundary and intentionally withheld final evidence tools until a later phase. This corrective plan closes that gap.
+This plan does not add Phase 3 dense/RRF seed retrieval or Phase 4 reranking/supporting-context high-accuracy behavior.
 
-Phase 2 now owns:
+## 2. One shared service
 
-- ordinary exact/lexical seed retrieval;
-- required Evidence Graph closure;
-- material-conflict fixed-point closure;
-- strict Evidence Package assembly;
-- the shared Python evidence service;
-- ordinary CLI retrieval;
-- the basic MCP tools/resources whose success contracts are defined by the design.
-
-Phase 2 still does not own Phase 3 dense/RRF retrieval or Phase 4 cross-encoder reranking/supporting-context enhancements.
-
-## 2. One service, several adapters
-
-Implement exactly one domain service for evidence-bearing operations.
-
-Conceptually:
+The only ordinary evidence pipeline is:
 
 ```text
-Python API / CLI / MCP
-        |
-        v
-request validation and mode resolution
-        |
-        v
-shared evidence service
-        |
-        +--> exact lookup / lexical retrieval
-        +--> required context closure
-        +--> material-conflict closure
-        +--> strict Evidence Package serializer
-        |
-        v
-immutable active release
+validated request
+  -> exact/identifier and/or lexical direct seed selection
+  -> required Evidence Graph closure
+  -> material-conflict closure
+  -> repeat graph/conflict closure to least fixed point
+  -> strict Evidence Package serializer
+  -> typed Python result/error
+  -> CLI/MCP adapters
 ```
 
-CLI and MCP adapters are projections of the same service. They must not duplicate SQL, traversal, warning, conflict, pagination, or serialization logic.
+Adapters do not reimplement SQL, traversal, conflict, warning, pagination, or serialization logic.
 
-## 3. Phase 2 retrieval modes
+Internal direct lookup/search primitives may exist for implementation/testing, but they are not public substitutes for context-complete evidence.
 
-Phase 2 implements the ordinary capabilities available before semantic retrieval:
+## 3. Phase 2 retrieval capabilities
 
-- explicit `exact` mode;
-- `auto` resolving to the best Phase 2-capable exact/lexical path;
-- no successful explicit `hybrid` or Phase 4-enhanced `high_accuracy` unless the installed runtime and active release actually contain those later capabilities.
+Phase 2 supports the exact/lexical capabilities available before semantic retrieval.
 
-An explicit unavailable mode returns `feature_unavailable` rather than silently degrading.
+- explicit `exact` uses the exact/lexical path defined by current design;
+- `auto` resolves only to capabilities present in the installed runtime and active release;
+- explicit unsupported later modes fail with `feature_unavailable` rather than being relabelled as successful Phase 2 results.
 
-When `auto` cannot use a later optional capability because it is absent, behavior follows the design's capability/warning contract and still uses the same Phase 2 evidence service.
-
-Required context/conflict correctness never depends on mode speed.
+Required context/conflict correctness is independent of mode speed.
 
 ## 4. Request-validation boundary
 
-Validate all request fields before retrieval work.
+Validate the current Section 22 field/aggregate bounds before expensive work.
 
-Preserve the design's exact public bounds, including:
+At minimum preserve:
 
-- query: trimmed `minLength: 1`, `maxLength: 4096`, encoded value at most 16,384 UTF-8 bytes;
-- opaque IDs: `minLength: 1`, `maxLength: 128`, pattern `^[a-z0-9][a-z0-9._:-]{0,127}$`;
-- exact lookup/filter strings: 1-128 Unicode scalars plus closed-enum validation where applicable;
-- filter arrays: at most 64 unique values each;
-- `search_evidence`: at most 256 values across all filter arrays;
-- result limit: 1-100;
-- cursor: at most 4096 characters plus authenticated release-bound syntax;
-- page number: positive 32-bit range and within manifested page count.
+- query 1-4096 trimmed Unicode scalars and <=16,384 encoded UTF-8 bytes;
+- opaque IDs 1-128 and the exact public opaque-ID pattern;
+- exact lookup/filter strings 1-128 plus applicable closed enums;
+- filter arrays <=64 unique values each;
+- `search_evidence` <=256 total filter values;
+- result limit 1-100;
+- cursor <=4096 plus authenticated release binding;
+- page number within the manifested positive 32-bit range.
 
-The same bound is checked before and after the field's specified normalization. Over-limit input cannot become valid merely because trimming or normalization shortens it.
+Apply the applicable limit before and after field-specific normalization. Invalid requests do not reach retrieval/model/page work.
 
-Reject invalid requests before loading models, touching expensive retrieval services, or allocating page working sets.
+## 5. Direct seed selection
 
-## 5. Shared direct seed selection
+### 5.1 Exact clause
 
-Phase 2 retains direct primitives internally, but they are now components of the final ordinary evidence path rather than public substitutes for it.
+`get_clause` validates exact document ID/clause, resolves the exact canonical clause with no fuzzy/edition substitution, selects every source in the complete Section 14.1 exact-lookup set, marks them direct `retrieval_seed` items, and then runs required graph/conflict closure from the complete set.
 
-### 5.1 Exact clause seeds
+### 5.2 Search
 
-`get_clause`:
+`search_evidence` uses installed exact/identifier and lexical seed channels for the resolved Phase 2 mode.
 
-1. validates exact `document_id` and `clause_number`;
-2. resolves the canonical clause node with no fuzzy or edition substitution;
-3. selects exactly the complete Section 14.1 exact-lookup chunk/source set;
-4. marks those sources `retrieval_seed`;
-5. runs required graph/conflict closure from every direct source.
+Metadata filters are exact. Values are ORed within a list and categories are ANDed. The current design's default status behavior applies; explicit null removes the default status filter where defined.
 
-### 5.2 Search seeds
+Filters constrain direct seeds only. Required context/conflict attachments preserve their actual edition/status/jurisdiction/type even when those values fall outside a direct-seed filter.
 
-`search_evidence` Phase 2 seed selection combines the exact/identifier and lexical behavior available in the resolved mode.
+### 5.3 No match
 
-Metadata filters use exact normalized catalog values. Values are ORed within a filter list and filter categories are ANDed. Default status behavior follows the design; explicit null status removes the active-only default.
+No direct match is a successful `complete` result with empty evidence/context-target/conflict arrays, not a not-found error.
 
-Filters constrain direct seeds only. Required context and material conflict attachments retain their actual source metadata even when they fall outside the direct-seed filter.
+## 6. Required graph/conflict handoff
 
-### 5.3 No-match semantics
+Every evidence-bearing Phase 2 request enters the fixed point defined by the required-context and material-conflict appendices.
 
-No direct match is a successful `complete` response with empty `evidence`, `context_targets`, and `conflicts`, not a transport/domain error.
+Success occurs only after:
 
-## 6. Required graph/conflict closure handoff
+- required graph closure has satisfied or visibly represented all admitted required obligations;
+- every material confirmed/unresolved conflict side required by the current release has been attached;
+- newly attached conflict sources receive their own required closure;
+- graph/conflict closure reaches the deterministic fixed point;
+- all applicable bounds pass;
+- central strict serialization passes.
 
-Every evidence-bearing Phase 2 request passes direct seeds through the shared fixed point specified by the two companion corrective plans.
+If complete required closure would exceed a declared bound, return `context_limit_exceeded` and publish no partial Evidence Package.
 
-The service returns success only after:
+## 7. Evidence Package roots
 
-- complete required graph closure;
-- complete material-conflict closure;
-- graph/conflict fixed point;
-- deterministic object/path/reason ordering;
-- bound checks;
-- strict serialization validation.
+`search_evidence` returns exactly `{query, retrieval_mode, release, context_completeness, evidence, context_targets, conflicts, warnings}`.
 
-If complete required closure does not fit a declared bound, return `context_limit_exceeded` and no partial Evidence Package.
+`get_clause` returns exactly `{release, context_completeness, evidence, context_targets, conflicts, warnings}`.
 
-Phase 2 does not run Phase 4 supporting context on ordinary exact/lexical requests.
+`get_context` returns exactly `{release, source_id, context_completeness, evidence, context_targets, context, conflicts, warnings}`.
 
-## 7. Evidence Package root contract
-
-Every evidence-bearing success uses the current closed root shape.
-
-`search_evidence` returns:
-
-```text
-query
-retrieval_mode
-release
-context_completeness
-evidence[]
-context_targets[]
-conflicts[]
-warnings[]
-```
-
-`get_clause` returns the same evidence-bearing structure except for fields the design omits from that tool's root contract.
-
-`get_context` returns its design-defined root fields and required relation-family arrays.
-
-Unknown root properties fail strict serialization rather than being emitted opportunistically.
+Unknown root properties fail closed.
 
 ## 8. Source-backed evidence item
 
-Every `evidence[]` item is source-faithful and uses only the Section 21 closed schema.
+Every `evidence[]` item uses the current closed Section 21 schema and is source-faithful.
 
-The implementation must populate and independently verify the design-owned projections, including:
+The serializer verifies exact source/document/chunk/node ownership; document/edition/status projections; canonical classifications/provenance; exact `original_text`; page spans/boxes/citation; complete source/build/assembly lineage; typed warnings; and closed public fields.
 
-- exact `source_id` and `document_id`;
-- document code and edition;
-- document type/normative status/lifecycle status;
-- clause and heading path;
-- canonical node classifications;
-- constant untrusted-source content-trust marker;
-- exact original source text;
-- page start/end and available boxes;
-- deterministic citation;
-- complete source/build/assembly lineage;
-- typed per-item warnings.
+Generated summaries never replace source text.
 
-The central serializer recomputes catalog-bound projections and fails closed on disagreement.
+## 9. Lineage dimensions
 
-Generated summaries never replace `original_text`.
+Source provenance binds approved manifest/source identity and exact contributed canonical-node/page spans.
 
-## 9. Evidence Lineage
+Build provenance binds release artifact hashes, vocabulary/classification provenance, canonical/parser/page/chunk/relationship/conflict transformations, and graph/context/conflict rule identities. Immutable `lineage.json` remains query-independent.
 
-Use the current three-dimension lineage model without creating parallel provenance.
-
-### 9.1 Source provenance
-
-Bind the approved manifest/source identity and exact contributed canonical-node/page spans.
-
-### 9.2 Build provenance
-
-Bind:
-
-- build/release artifact hashes;
-- evidence vocabulary;
-- exact classification records/provenance;
-- canonical node/chunk identities;
-- transformation artifact identities;
-- graph/context/conflict rule-set identities;
-- diagnostic state.
-
-Immutable `lineage.json` remains query-independent.
-
-### 9.3 Assembly provenance
-
-Runtime adds request-scoped selection reasons using only the existing closed fields:
-
-- `selection_roles`;
-- `seed_source_ids`;
-- `context_completeness`;
-- retrieval records for direct seeds;
-- fusion/rerank only when that stage actually exists in the resolved later mode;
-- `context_paths`;
-- `conflict_reasons`.
-
-Phase 2 lexical/exact execution never fabricates dense/fusion/rerank records.
+Assembly provenance uses only current closed fields such as selection roles, seed source IDs, context completeness, exact/lexical retrieval records, context paths, and conflict reasons. Phase 2 never fabricates dense/fusion/rerank records.
 
 ## 10. Context targets
 
-A required traversal may reach an accepted empty structural node with no source text.
+A valid required traversal may reach an empty structural node with no source text. Represent it only in `context_targets` using the exact safe catalog/manifest projection and accepted paths. Never fabricate original text/citation/page/source lineage for an empty node.
 
-Such a target appears in `context_targets`, not as fabricated evidence.
+## 11. Conflicts
 
-Each strict record contains only the design's safe catalog/manifest projection and one or more accepted context paths. It has no `original_text`, source locator, citation, page coordinate, source lineage, or generated prose.
+Every evidence-bearing success includes the required `conflicts` array, empty when no material record applies.
 
-The serializer validates that every target is reachable through the retained path and that every required accepted empty target is present.
+Reject missing records/positions/source covers, one-sided conflict projection, wrong span/source ownership, invalid state/dimension/order, false precedence, or generated conflict prose presented as source authority.
 
-## 11. Conflict projection
+## 12. Completeness and errors
 
-The root `conflicts` array is required on evidence-bearing success and follows `phase-2-material-conflict-closure.md`.
-
-Every material admitted record is complete and stable-ordered. The serializer rejects:
-
-- missing material conflicts;
-- extra non-material records in an ordinary request;
-- missing positions;
-- one-sided source sets;
-- mismatched position spans;
-- invalid precedence projections;
-- generated conflict prose presented as source fact.
-
-## 12. Context completeness
-
-Use exactly the design's closed states:
-
-- `complete`;
-- `incomplete_required` where the design allows a source-faithful incomplete result for unresolved/uncertain required facts;
-- `truncated_optional` only where an optional Phase 4/diagnostic traversal was requested and was deterministically truncated.
-
-A hard required bound overflow is not `incomplete_required`; it is the `context_limit_exceeded` tool error with no partial success.
-
-The result-level value is the deterministic worst state across the returned evidence subgraph according to the design ordering.
+Use only `complete`, `incomplete_required`, and `truncated_optional` under their exact design conditions. Required bound overflow is `context_limit_exceeded` with no partial success.
 
 ## 13. Typed warnings
 
-Warnings are data, not log-only diagnostics.
+Implement the exact diagnostics needed by ordinary Phase 2 evidence, including source-coordinate/parser/OCR uncertainty, classification unresolved, context incomplete/cycle/status boundary, cross-reference unresolved, table anomaly, applicability/evidence insufficiency, `evidence_conflict`, and `conflict_unresolved` where applicable.
 
-Phase 2 must implement every warning needed by its ordinary exact/lexical/context/conflict behavior, including as applicable:
+Warnings use code-owned messages and closed safe details.
 
-- source coordinate incompleteness;
-- parser/OCR uncertainty propagated by source/build lineage;
-- unresolved classification;
-- required context incomplete;
-- unresolved cross-reference;
-- table structure anomaly;
-- context status boundary;
-- context cycle detected;
-- material `evidence_conflict`;
-- `conflict_unresolved`;
-- applicability/evidence insufficiency required by the current design.
+## 14. Evidence tools
 
-Warnings use only the closed code/phase/severity/message/source/details schema and safe detail keys. Adapters may not invent prose warnings with different semantics.
+`search_evidence`, `get_clause`, and `get_context` implement current Section 22 semantics directly and all call the shared service. Metadata/list/page tools remain exact safe projections without invented evidence semantics.
 
-## 14. `search_evidence`
+## 15. MCP resources are separate contracts
 
-Implement the Section 22 semantic contract directly.
+MCP resources obey `phase-2-mcp-wire-resources.md` and Section 22.3 exactly.
 
-### Selection
+- the clause resource is context-complete where the design specifies it;
+- **the source resource is not an Evidence Package projection**: `standards://source/{source_id}` returns only validated source chunk `original_text` with exact `text/plain;charset=utf-8` MIME and no wrapper;
+- document/release/page resources keep their own exact MIME/payload contracts.
 
-- bounded query;
-- exact metadata filters;
-- resolved Phase 2 mode;
-- exact/lexical direct seeds;
-- required graph-and-conflict closure for every seed.
+A richer evidence tool does not alter a resource's canonical byte contract.
 
-### Success
+## 16. CLI and Python API
 
-Return a strict root containing the ordered direct, expanded-context, and conflict-context evidence items; empty-node context targets; material conflicts; and typed warnings.
+The typed Python API is the canonical service layer. CLI search/get-clause/get-context use the same evidence service and machine-readable output cannot drop evidence semantics, warnings, context targets, conflicts, or typed errors.
 
-### Domain errors
+Do not expose a second public direct-evidence API that could be mistaken for complete ordinary evidence.
 
-At minimum route exactly:
+## 17. Central serializer
 
-- malformed/over-limit input -> `identifier_invalid`;
-- explicit unavailable mode -> `feature_unavailable`;
-- required closure overflow -> `context_limit_exceeded`;
-- release integrity failure -> `release_integrity_failed`.
+One serializer checks release identity; source/catalog ownership; original text/citation/page projections; classifications/provenance; source/build/assembly lineage; selection roles/seeds/retrieval records; context completeness/paths/targets; conflicts/reasons; warnings; deterministic ordering; public allowlists; and output/frame bounds.
 
-No match remains a complete empty success.
+Disagreement fails closed.
 
-## 15. `get_clause`
+## 18. Release/runtime integrity
 
-Implement exact document/clause semantics with no fuzzy clause lookup or edition substitution.
+Evidence work opens only a validated immutable active release. Startup/release validation verifies all schema/artifact/rule versions needed by exact/lexical retrieval plus graph/context/conflict/serializer behavior. Rollback restores the matching catalog/index/relationship/context/conflict/lineage/configuration set atomically.
 
-Every source in the exact-lookup set is a direct seed. Run required graph/conflict closure from the complete seed set.
+## 19. Evaluation alignment
 
-Unknown document/clause is `resource_not_found`.
+Phase 2 evaluation follows `phase-2-release-gates.md` exactly.
 
-Success must contain non-empty source-backed evidence for a valid found clause plus any required attached context/conflict sources.
+- retrieval Recall@K and classification/conflict candidate/precision families use the design's probabilistic Wilson gates;
+- required-context/path/status/order correctness is a zero-failure complete deterministic traversal conformance suite;
+- conflict position/source/lineage completeness and all-side runtime preservation is a zero-failure complete deterministic conflict conformance suite;
+- strict Evidence Package/interface behavior is deterministic conformance.
 
-## 16. `get_context`
+Do not invent a separate held-out 100% context/all-side gate in place of Section 29.4.
 
-Implement exact `source_id` lookup and the closed `context_level` enum:
+## 20. Required conformance fixtures
 
-- `required`;
-- `supporting`;
-- `diagnostic`.
+Include exact clause with/without expansion, lexical dependency/definition, exception+condition, table context, empty target, unresolved standard/critical cases, confirmed/unresolved conflicts, graph-conflict fixed point, required overflow, no-match success, filter/status preservation, Python/CLI/MCP equivalence, and raw source resource byte/MIME contract.
 
-Each level includes all preceding levels. Relation-family booleans intentionally narrow this explicit inspection request, but they do not alter the automatic required closure previously performed by search/clause operations.
+## 21. Negative/security fixtures
 
-The response `context` object always contains the required arrays:
+Cover malformed IDs/overlimits/extra properties, forged sources, resource URI attacks, path leakage, invalid graph edges, fabricated context-target source fields, citation/page mismatch, missing conflict side, false precedence, output-budget overflow, and cancellation/deadline late-success races.
 
-- `parents`;
-- `applicability`;
-- `dependencies`;
-- `definitions`;
-- `exceptions`;
-- `notes`;
-- `tables`;
-- `references`;
-- `versions`;
-- `adjacent`.
+## 22. Implementation sequence
 
-Disabled or unavailable families are empty arrays rather than missing properties.
+1. complete/validate graph/context/conflict release contracts;
+2. implement exact/lexical seed service;
+3. implement required graph/conflict fixed point;
+4. implement evidence/context-target/conflict projections;
+5. implement completeness/warning/error routing;
+6. implement central serializer;
+7. expose typed Python service;
+8. project through CLI/MCP tools;
+9. implement each MCP resource according to its independent exact contract;
+10. run protocol/security conformance and current Section 29.4 gates;
+11. run activation/rollback validation.
 
-Conflict closure preserves every material side reached through enabled families.
+## 23. Acceptance criteria
 
-## 17. Metadata/list/page tools
-
-Retain and align the already planned Phase 2 tools:
-
-- `get_document_metadata`;
-- `list_documents`;
-- `get_page_reference`.
-
-These tools remain direct catalog/page projections and do not run evidence closure unless the design explicitly requires it.
-
-No absolute filesystem path, raw source locator, credential, or inferred legal force may appear in public output.
-
-## 18. Resources
-
-Advertise the design's initial resources/templates only when implemented and validate their canonical URI spelling.
-
-Resource reads use the same active release/catalog authority and strict safety rules as tools.
-
-Source/clause evidence resources, where defined by Section 22, must project the same context-complete source/evidence semantics rather than a separate partial implementation.
-
-Page resources remain authorized page access, never arbitrary filesystem reads.
-
-Release resources expose safe immutable release metadata only.
-
-## 19. MCP server behavior
-
-Reuse the existing Phase 2 MCP protocol/admission plans for:
-
-- JSON-RPC framing;
-- strict argument/output schema validation;
-- bounded frames;
-- cancellation/deadlines;
-- request admission;
-- byte budgets;
-- terminal-state atomicity;
-- stable tool/resource lists for process lifetime.
-
-The correction changes **which Phase 2 evidence tools are implemented successfully**, not the transport safety contract.
-
-A runtime process advertises only implemented capabilities. A later release pointer change becomes visible after restart according to the design; in-session lists do not mutate silently.
-
-## 20. CLI behavior
-
-Phase 2 `clausesift search` and `clausesift get-clause` are no longer labelled as context-incomplete diagnostic substitutes.
-
-They call the shared context-complete evidence service and expose the same source/context/conflict semantics as Python/MCP.
-
-Human-readable formatting may differ, but a machine-readable mode must retain every semantic field needed to reproduce the shared result and must not suppress blocking warnings/conflicts.
-
-`get-context`, metadata/list/page, release inspection, activation, and rollback commands follow the same shared service/release authority.
-
-## 21. Python API
-
-Expose typed service/result objects rather than backend-native SQLite rows.
-
-The Python public API is the canonical reusable implementation beneath CLI and MCP, including:
-
-- search;
-- exact clause retrieval;
-- context inspection;
-- metadata/list/page access;
-- release metadata where public;
-- typed domain errors.
-
-Do not provide a second public "direct" evidence API whose success could be mistaken for complete ordinary evidence. Lower-level exact/lexical primitives may remain internal/testing interfaces.
-
-## 22. Central serializer
-
-Implement one strict Evidence Package serializer/validator.
-
-Before returning any evidence-bearing success it independently checks at minimum:
-
-- release ID consistency;
-- item document/source identity and catalog ownership;
-- source text and citation projection;
-- page-span/box projection;
-- canonical classifications and provenance;
-- transformation/build lineage references;
-- selection roles and seed IDs;
-- retrieval record channels/ranks/scores supported by the resolved mode;
-- context completeness;
-- context paths/edge provenance;
-- conflict reasons;
-- required context targets;
-- material conflict array completeness;
-- warning schema/ordering;
-- output/frame bounds.
-
-Serialization failure is fail-closed; adapters cannot bypass it.
-
-## 23. Ordering
-
-Freeze deterministic total orders for all output collections according to the detailed design.
-
-At minimum preserve stable ordering for:
-
-- direct retrieval seeds;
-- expanded/conflict evidence items;
-- selection roles;
-- context paths and path steps;
-- context targets;
-- conflict records/positions/source IDs/spans;
-- warnings;
-- documents/list pagination.
-
-Never rely on SQLite physical order, Python hash iteration, or backend return order.
-
-## 24. Release and runtime integrity
-
-The evidence service opens only a fully validated immutable active release.
-
-Startup validation checks every schema/artifact/rule version needed to execute ordinary evidence semantics.
-
-A lazy integrity failure for any later optional model follows quarantine rules; Phase 2 exact/lexical operation itself must not require a semantic model.
-
-Rollback restores catalog, relationship/context/conflict artifacts, `lineage.json`, lexical index, rule/configuration identities, and the active pointer as one release.
-
-## 25. Evaluation
-
-Extend Phase 2 evaluation beyond direct lexical hits.
-
-The final user-facing exact/lexical evidence path must be evaluated end to end for:
-
-- correct direct source/edition/clause;
-- citation/page correctness;
-- required scope/applicability;
-- required dependencies/definitions/exceptions;
-- required table context;
-- context target materialization;
-- material conflict all-side completeness;
-- warnings/completeness states;
-- Python/CLI/MCP semantic equivalence.
-
-Lexical Recall@K remains a seed-retrieval gate, not proof of Evidence Package correctness.
-
-## 26. Required conformance fixtures
-
-Include end-to-end fixtures for:
-
-1. exact clause with no expansion;
-2. exact clause requiring parent/applicability context;
-3. lexical hit requiring definition/dependency context;
-4. exception plus its condition;
-5. table-row seed requiring table/clause context;
-6. empty structural target represented only in `context_targets`;
-7. unresolved required reference on standard tier producing visible incomplete state/warning;
-8. the corresponding critical-tier release blocker;
-9. confirmed material conflict forcing all positions;
-10. standard-tier unresolved conflict;
-11. required graph/conflict fixed-point expansion;
-12. context-limit failure with no partial response;
-13. no-match complete empty response;
-14. status/edition filter preserving direct seed constraints while required attachments retain actual metadata;
-15. CLI/Python/MCP byte-equivalent semantic projections after transport/format normalization.
-
-## 27. Negative/security fixtures
-
-Prove rejection of:
-
-- malformed IDs and over-limit strings/arrays;
-- extra JSON properties;
-- unsupported enum values;
-- forged/foreign source IDs;
-- path traversal/resource URI tricks;
-- absolute-path leakage;
-- context path using a non-validated edge;
-- context target with source-bearing fields;
-- source item with mismatched citation/page spans;
-- missing required conflict side;
-- one-sided conflict serialization;
-- output over frame limit;
-- request cancellation/deadline race publishing a later success.
-
-## 28. Implementation sequence
-
-1. complete the Phase 2 required-context and material-conflict corrective data contracts;
-2. implement build/release validation for required graph/conflict artifacts;
-3. implement the shared exact/lexical seed service;
-4. implement required graph/conflict fixed point;
-5. implement strict source-backed evidence projection;
-6. implement context-target projection;
-7. implement conflict projection;
-8. implement typed warning/completeness routing;
-9. implement the central strict serializer;
-10. expose the typed Python service;
-11. update CLI search/clause/context to use it;
-12. update MCP tools/resources to use it;
-13. run protocol/admission/cancellation conformance;
-14. add cross-interface equivalence tests;
-15. add end-to-end evidence-semantics evaluation;
-16. add corruption, failure-injection, activation, and rollback tests;
-17. update Phase 2 release reports/gates;
-18. verify later Phase 3 seed retrieval can enter this service without schema or semantics changes.
-
-## 29. Acceptance criteria
-
-Phase 2 evidence-service correction is complete only when:
-
-1. exact/lexical direct seed retrieval remains deterministic and edition-safe;
-2. every evidence-bearing exact/lexical success performs complete required graph/conflict closure;
-3. one central serializer enforces the current closed Evidence Package contract;
-4. `search_evidence`, `get_clause`, and `get_context` implement the current Section 22 semantics rather than returning feature-unavailable/partial direct evidence for ordinary Phase 2 capabilities;
-5. metadata/list/page surfaces remain safe and exact;
-6. source/build/assembly lineage is complete and separated correctly;
-7. context targets are represented without fabricated evidence;
-8. every material conflict side is present;
-9. typed warnings/completeness/error routing matches the design;
-10. required bound overflow returns `context_limit_exceeded` with no partial package;
-11. Python, CLI, and MCP use the same evidence service and produce semantically identical results;
-12. strict request/output/protocol/admission/cancellation bounds pass conformance tests;
-13. held-out end-to-end evidence correctness, activation, and rollback gates pass;
-14. no Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation is pulled into this corrective Phase 2 work.
+Phase 2 evidence-service work is complete only when exact/lexical seeds are deterministic/edition-safe; every ordinary evidence seed enters complete required graph/conflict closure; central strict serialization passes; evidence tools meet Section 22; metadata/list/page remain safe; source/build/assembly lineage is correct; empty targets are not fabricated; all material sides are preserved; completeness/warnings/errors match design; required overflow yields no partial package; Python/CLI/MCP evidence semantics are equivalent; MCP resources obey their independent exact contracts (especially raw source text); current Section 29.4 gates and protocol/security/activation/rollback conformance pass; and no Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation is pulled into Phase 2.

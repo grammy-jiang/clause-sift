@@ -3,100 +3,58 @@
 **Project:** ClauseSift  
 **Phase:** 2 — Exact Retrieval MVP  
 **Status:** Normative current-design Phase 2 implementation-plan appendix  
-**Primary design authority:** `docs/design.md` Sections 7.1, 17, 19, 20, 21, 22, 25-27, and 31  
+**Primary design authority:** `docs/design.md` Sections 7.1, 17, 19-22, 25-27, 29, and 31
 
 ## 1. Purpose
 
-Current `docs/design.md` assigns deterministic required Evidence Graph context closure to Phase 2. This appendix defines the implementation work needed to bring the Phase 2 plan into conformance with that current boundary.
+Phase 2 owns deterministic **required** Evidence Graph closure for every ordinary exact/lexical evidence result. A seed is not a safe final result when its meaning depends on governing scope, applicability, definitions, dependencies, exceptions, required table context, or a material conflict side.
 
-The implementation must make ordinary exact/lexical evidence safe to interpret without relying on Phase 3 semantic retrieval or Phase 4 high-accuracy supporting context.
+Phase 2 must either return the complete bounded required closure or fail visibly. It must not silently return the seed alone.
 
-Required closure is correctness work, not an optional presentation feature. If a retrieved requirement is incomplete without its governing scope, applicability condition, dependency, definition, exception, table context, or material conflict side, ClauseSift must either return the complete bounded closure or fail visibly. It must never silently return the seed alone.
+This plan does not add Phase 3 semantic retrieval or Phase 4 high-accuracy supporting-context expansion.
 
-## 2. Scope
+## 2. Context classes and Phase 2 boundary
 
-### 2.1 In scope
+Use the current closed classes:
 
-Phase 2 implements:
-
-- release-validated Evidence Graph structural/semantic relationship consumption;
-- the closed v0.1 required-context rule set;
-- deterministic required-first traversal;
-- path-state rather than target-only traversal deduplication;
-- path-local cycle detection;
-- source-backed target materialization;
-- metadata-only materialization for accepted empty structural targets;
-- deterministic source-cover selection for graph targets;
-- required-context completeness states and warnings;
-- exact current-design traversal bounds;
-- fixed-point composition with material-conflict closure;
-- deterministic ordering/deduplication of the returned bounded evidence subgraph;
-- release-time proofs that exact-clause required closure fits declared bounds;
-- runtime fail-closed behavior when required closure cannot fit;
-- runtime assembly lineage for accepted paths;
-- integration with exact and lexical seed retrieval and the shared Evidence Package service.
-
-### 2.2 Out of scope
-
-This Phase 2 work does not implement:
-
-- dense retrieval;
-- embeddings;
-- RRF;
-- cross-encoder reranking;
-- Phase 4 supporting-context expansion for ordinary high-accuracy answers;
-- diagnostic context unless explicitly requested by `get_context` and already part of the public Phase 2 context-inspection contract;
-- LLM-generated or probabilistic navigable graph edges;
-- arbitrary graph queries uploaded by callers;
-- inference of missing applicability or relationships from similarity.
-
-## 3. Required-context classes
-
-Implement the exact current-design context classes:
-
-1. `required` — omission may change scope, applicability, normative meaning, a value, or the subject of an exception;
-2. `supporting` — useful corroboration/navigation that is not required for ordinary interpretation;
+1. `required` — omission can change scope, applicability, normative meaning, a value, or an exception's subject;
+2. `supporting` — useful corroboration/navigation but not required for ordinary interpretation;
 3. `diagnostic` — inspection-only adjacency/version material.
 
-Automatic Phase 2 `search_evidence` and `get_clause` success paths run **required** closure. They do not require Phase 4 supporting expansion.
+Ordinary Phase 2 `search_evidence` and `get_clause` run required closure only.
 
-`get_context` uses the closed context-level enum `required`, `supporting`, `diagnostic`, where each level includes all preceding classes and defaults to the design-defined value. Relation-family include flags on explicit inspection calls may narrow only that explicit inspection request; they never disable automatic required closure for ordinary evidence-returning operations.
+`get_context` may explicitly request `required`, `supporting`, or `diagnostic`, where each level includes preceding levels under the current design. That inspection capability does not make Phase 4 supporting-context expansion part of ordinary Phase 2 search.
 
-## 4. Release-bound context identity
+## 3. Release-bound context identity
 
-Every release must bind the complete behavior-bearing context contract before activation.
+Every active release binds every behavior-bearing context input, including:
 
-At minimum record and validate:
-
-- `edge_identity_schema_version`;
-- `occurrence_identity_schema_version`;
-- `context_rule_set_version`;
-- canonical context configuration SHA-256;
-- exact Evidence Vocabulary version/hash;
-- relation-type rank/order identity;
-- structural/semantic path-depth limits;
+- edge identity schema;
+- occurrence identity schema;
+- context rule-set version/configuration hash;
+- Evidence Vocabulary version/hash;
+- relation-type rank/order;
+- structural/semantic depth bounds;
 - object/path/step/conflict/position/reason bounds;
-- materialization/source-cover algorithm version;
-- path-order/tie-break version where separately identified.
+- target materialization/source-cover algorithm version;
+- ordering/tie-break behavior where separately versioned.
 
-Changing any behavior-bearing value invalidates the appropriate context/cache/downstream artifacts and changes build/release identity according to Section 25.
+A behavior change invalidates the appropriate context/cache/downstream release identity according to Section 25.
 
-## 5. Navigable relationship prerequisite
+## 4. Navigable relationship prerequisite
 
-Runtime traversal consumes only release-validated graph relationships.
+Runtime traverses only release-validated relationships.
 
-### 5.1 Structural relationships
+### Structural
 
-Use only canonical release-validated structural relationships, including:
+- `contains`: immediate parent -> immediate child;
+- `precedes`: canonical immediate-next relation where diagnostic traversal requests it.
 
-- `contains` in parent -> immediate child direction;
-- `precedes` in canonical immediate-next direction where diagnostic traversal asks for it.
+Structural hierarchy cycles are release-invalid.
 
-Structural ownership cycles are release-invalid.
+### Semantic
 
-### 5.2 Semantic relationships
-
-Only uniquely resolved, origin-authorized semantic edges are navigable:
+The closed initial vocabulary is:
 
 - `references`;
 - `depends_on`;
@@ -106,100 +64,59 @@ Only uniquely resolved, origin-authorized semantic edges are navigable:
 - `amends`;
 - `applies_subject_to`.
 
-Every navigable edge uses its canonical direction and stable `edge_id`; every semantic supporting occurrence retains stable `cross_reference_id` and origin-group provenance.
+A semantic occurrence is navigable only after unique resolution and required origin-authority checks. Every navigable edge has a stable canonical-direction `edge_id`; supporting occurrences retain stable `cross_reference_id` and origin-group provenance.
 
-A non-resolved occurrence has no navigable `edge_id` and is never followed by matching document code, edition, clause label, text similarity, or latest-status heuristics.
+An unresolved/ambiguous/authority-insufficient occurrence has no navigable edge and is never followed by text similarity, clause-label guessing, document-code heuristics, or latest-edition substitution.
 
-## 6. Closed required traversal rules
+## 5. Closed required rules
 
-Implement the v0.1 required rules exactly and version them as executable configuration.
+### 5.1 Applicability
 
-### 6.1 Applicability
+For requirement/clause/subclause/paragraph/table-row/exception nodes, follow `applies_subject_to` forward as required. Include every uniquely resolved admitted target and recursively run its required rules.
 
-For `requirement`, `clause`, `subclause`, `paragraph`, `table_row`, or `exception`:
+### 5.2 Dependencies
 
-- follow `applies_subject_to` forward as required;
-- include every uniquely resolved admitted applicability target;
-- recursively execute required rules on the accepted target.
+For requirement/clause/subclause/paragraph/table-row/exception nodes, follow `depends_on` forward to the current design's admitted dependency endpoint types and recursively run required rules.
 
-Missing/unresolved required applicability never proves applicability is absent.
+A definition required by actual term use must be compiled as the appropriate dependency; runtime does not reverse-scan all scoped definitions.
 
-### 6.2 Dependencies
+### 5.3 Exceptions
 
-For `requirement`, `clause`, `subclause`, `paragraph`, `table_row`, or `exception`:
+For requirement/clause/subclause/paragraph/table-row nodes, follow `exception_to` in reverse to every explicit limiting exception, then run the exception's required rules.
 
-- follow `depends_on` forward as required;
-- accept only uniquely resolved definition/requirement/clause/subclause/table/document endpoints admitted by the design;
-- recursively execute required rules.
+For an exception, follow `exception_to` forward to the exact affected source-bearing target and stop that relation after the target while still running the exception's applicability/dependency rules.
 
-A definition needed because the source actually uses a governed term must be represented by a compiled dependency; runtime reverse-scanning all definitions in scope is forbidden.
+Sibling position or semantic similarity cannot create an exception.
 
-### 6.3 Exceptions
+### 5.4 Definition scope
 
-For `requirement`, `clause`, `subclause`, `paragraph`, or `table_row`:
+For a definition, follow `defines` forward to the exact governing scope and stop that relation there. A definition is never treated as globally applicable solely because it was retrieved.
 
-- follow `exception_to` in reverse;
-- include every exception that explicitly limits that node;
-- then run the exception's own required rules.
+### 5.5 Table row
 
-For an `exception` node:
+For a table row, reverse `contains` reaches the containing table and nearest addressable clause. Materialization preserves validated table title, headers, units, and the row; unrelated sibling rows are not attached merely by proximity.
 
-- follow `exception_to` forward to the exact affected source-bearing target;
-- stop further traversal of that relation after the target;
-- still run the exception's applicability/dependency rules.
+If required table structure cannot be supplied safely, retain source-faithful evidence, mark `incomplete_required`, and emit the current table-structure diagnostic. Never invent headers/units.
 
-Sibling position or text similarity never creates an exception relation.
+### 5.6 Note/footnote parent
 
-### 6.4 Definition scope
+A note/footnote follows reverse `contains` to the nearest source-bearing parent it qualifies. Its own normative status/modality is preserved; attachment never promotes informative material.
 
-For a `definition` seed/required node:
+## 6. Seed construction
 
-- follow `defines` forward as required;
-- include the exact governing scope;
-- stop that relation after the governing scope.
+For every direct source chunk:
 
-A definition is never presented as globally applicable merely because its text was retrieved.
+1. enumerate canonical member nodes in `chunk_nodes.member_order`;
+2. create one seed state per member node;
+3. preserve final direct candidate rank and source ID;
+4. keep exact document/chunk/node/source identity;
+5. label the direct source `retrieval_seed` in assembly lineage.
 
-### 6.5 Table row context
+Do not collapse several member nodes into a guessed clause or infer a different node from text.
 
-For a `table_row`:
+## 7. Required priority queue
 
-- follow reverse `contains` to the containing table and nearest addressable clause;
-- materialize the validated whole-table representation needed to preserve title, headers, units, and the row;
-- stop at the nearest addressable clause;
-- do not attach unrelated sibling rows merely because they share a table.
-
-A row with missing required structural context remains source-faithful but is `incomplete_required` and emits the typed table-structure diagnostic; headers/units are never inferred.
-
-### 6.6 Note/footnote parent
-
-For `note` or `footnote`:
-
-- follow reverse `contains` to the nearest source-bearing parent it qualifies;
-- preserve the note/footnote's own normative status/modality;
-- attachment must never promote informative material to normative evidence.
-
-### 6.7 Supporting/diagnostic rules
-
-Implement supporting/diagnostic rule metadata because `get_context` and Phase 4 reuse the same rule engine, but ordinary Phase 2 exact/lexical answers stop after required closure.
-
-The Phase 2 runtime must not silently run supporting/diagnostic traversal as a latency-dependent substitute for Phase 4 behavior.
-
-## 7. Seed construction
-
-For every directly returned source chunk:
-
-1. enumerate every canonical member node through `chunk_nodes` in `member_order`;
-2. create one seed record per member node;
-3. preserve direct source ID and final candidate rank;
-4. label the direct source role as retrieval seed;
-5. keep exact document/chunk/node/source identities from the active release.
-
-Seed construction must not collapse several member nodes to one guessed clause or infer a different node from source text.
-
-## 8. Required traversal priority queue
-
-Implement the exact total-order priority key:
+Use the exact total order:
 
 ```text
 (context-class rank,
@@ -212,22 +129,13 @@ Implement the exact total-order priority key:
  ordered edge IDs)
 ```
 
-Required entries are exhausted before supporting or diagnostic entries.
+Every queue entry retains origin seed, context class, full ordered edge/node prefix, current target, semantic depth, and deterministic path identity material.
 
-Every queue entry stores:
+No hash-map/SQLite physical order may affect dequeue behavior.
 
-- originating seed source;
-- context class;
-- complete ordered edge/node prefix;
-- current target document/node;
-- semantic-depth state;
-- deterministic path identity material.
+## 8. Path-state deduplication
 
-No unordered set/dictionary iteration may affect dequeue order.
-
-## 9. Path-state deduplication
-
-Deduplicate traversal states only by the complete state:
+Deduplicate only the full traversal state:
 
 ```text
 (seed_source_id,
@@ -237,293 +145,144 @@ Deduplicate traversal states only by the complete state:
  current target_node_id)
 ```
 
-Do **not** use a target-only visited set.
+Do not use a target-only visited set.
 
-Two different accepted paths that reconverge on the same target remain distinct path states and may both continue through later required edges. Materialized evidence/context objects may deduplicate by release-scoped source or node identity, but every accepted independent path must remain available in assembly lineage subject to the path-count bound.
+Independent paths that reconverge on one target remain distinct states and can both continue. Materialized objects may deduplicate by exact release-scoped source/node identity while retaining all accepted in-bound paths up to the declared path bound.
 
-## 10. Cycle handling
+## 9. Cycle handling
 
 Use path-local node/edge tracking.
 
-When a permitted semantic cycle would repeat a path-local node:
+For an allowed semantic `references`/`depends_on` cycle, retain the finite accepted prefix, do not enqueue the repeated step, and emit one deterministically keyed `context_cycle_detected` warning.
 
-- retain the finite accepted prefix;
-- do not enqueue the repeated step;
-- emit one deterministically keyed `context_cycle_detected` warning;
-- continue processing other in-bound paths.
+Structural/governing/amendment/supersession cycles are release-invalid and must not reach runtime.
 
-Structural/governing/amendment/supersession cycles are release-invalid and must never reach runtime.
+Traversal uses explicit bounded state rather than Python recursion depth as a safety mechanism.
 
-Cycle handling must never depend on recursion depth of Python call stacks; use explicit bounded traversal state.
+## 10. Target materialization
 
-## 11. Materialization rules
+### 10.1 Source-bearing target
 
-### 11.1 Source-bearing target
+Materialize only from canonical source/chunk/node membership. Each rule declares ordered node-qualified source intervals rather than one ambiguous flat range.
 
-Materialize source-backed evidence from canonical `sources`/`chunk_nodes`/node spans only.
+A selected source's contributed memberships must be in the declared target scope for their nodes. Use deterministic source-cover selection and require progress/complete declared coverage.
 
-Every target rule declares an ordered set of node-qualified intervals:
+Do not choose a broader unrelated chunk when a scope-contained source can cover the target.
 
-```text
-(node canonical_order,
- node_id,
- node_text_start,
- node_text_end)
-```
+### 10.2 Empty structural target
 
-Do not flatten a multi-node target into one ambiguous byte interval.
+A valid empty structural target is a metadata-only `context_targets` record with exact document/node/edition/status/heading/classification projections and accepted paths.
 
-### 11.2 Eligible source cover
+Never fabricate `original_text`, citation, page span, bounding box, source ID, or source/build lineage for an empty node.
 
-A catalog source is eligible only when every membership interval contributing to the chunk lies within the declared scope interval for the same node.
+## 11. Completeness and warnings
 
-Use a deterministic source-cover algorithm that prefers source-faithful scope coverage and does not silently add unrelated text merely because a broader chunk happens to contain the target.
+`complete` means all required graph/conflict obligations are satisfied within bounds.
 
-The implementation must guarantee progress and complete declared target coverage or fail closed.
+`incomplete_required` is used only under current design conditions where source-faithful evidence can be returned while required resolution/classification/structure remains incomplete, with the required typed warnings.
 
-### 11.3 Metadata-only target
+`truncated_optional` is only for explicit supporting/diagnostic traversal after complete required closure; it never hides a required obligation.
 
-When an accepted target is a valid empty structural node with no source-backed materialization:
+## 12. Exact runtime bounds
 
-- return a `context_targets` metadata record rather than fabricated evidence;
-- preserve exact document/node identity, heading/structural metadata, edition/status, and accepted traversal paths;
-- do not synthesize source text, citation spans, or bounding boxes.
+Implement the current values:
 
-A required empty target that cannot be represented with the exact catalog projection/path means context is not complete.
-
-## 12. Completeness states and warnings
-
-Implement the design's context completeness values and warning propagation.
-
-### 12.1 Complete
-
-`complete` means every required graph/context/conflict obligation has been satisfied within the declared bounds.
-
-### 12.2 Incomplete required
-
-Use `incomplete_required` when source-faithful evidence exists but a required relation/classification/structure cannot be completed safely, including relevant cases such as:
-
-- unresolved required cross-reference;
-- unresolved classification needed to decide/execute a required rule;
-- required table structure anomaly;
-- missing required materialization target.
-
-Emit all design-required typed warnings, including the specific root diagnostic plus `context_incomplete` where required.
-
-### 12.3 Optional truncation
-
-`truncated_optional` is allowed only when required closure is complete and an explicit supporting/diagnostic traversal stops before an optional candidate that would exceed a bound.
-
-Ordinary Phase 2 exact/lexical success cannot use optional truncation to hide required context.
-
-## 13. Exact runtime bounds
-
-Implement and test the current design limits:
-
-| Bound | Required Phase 2 value |
+| Bound | Value |
 | --- | --- |
-| Structural path depth | 64 edges |
-| Required semantic path depth | 8 edges per seed |
+| Structural path depth | 64 |
+| Required semantic path depth | 8 per seed |
 | Supporting semantic path depth | 1 |
 | Diagnostic semantic path depth | 2 |
-| Expanded context objects | 128 unique objects per request, excluding direct seeds |
+| Expanded context objects | 128 unique objects/request, excluding direct seeds |
 | Paths per returned context object | 32 |
 | Total accepted path steps | 1,024 |
-| Material conflict records | 64 per request |
+| Material conflict records | 64/request |
 | Positions per conflict | 16 |
 | Total conflict positions | 256 |
-| Conflict position spans | 1,024 per request |
-| Conflict inclusion reasons | 1,024 per request |
+| Conflict position spans | 1,024/request |
+| Conflict inclusion reasons | 1,024/request |
 
-The complete serialized output must also satisfy the existing MCP/output frame budgets.
+The complete output must also satisfy Section 22/MCP byte/frame budgets.
 
-## 14. Bound enforcement semantics
+## 13. Bound semantics
 
-### 14.1 Required closure
+A required graph/conflict candidate that would exceed a required depth/object/path/step/conflict/position/reason/byte bound causes `context_limit_exceeded` and **no partial Evidence Package success**.
 
-Evaluate bounds while candidates/path states are enqueued/materialized.
+For an explicit optional traversal, stop before the first optional over-bound candidate in deterministic order, retain complete required closure, set `truncated_optional`, and emit the permitted `context_truncated` details.
 
-If a required graph/conflict closure would exceed any depth/object/path/step/conflict/position/reason/byte bound:
+## 14. Graph/conflict least fixed point
 
-- return `context_limit_exceeded`;
-- emit no partial Evidence Package success;
-- release all request-local resources;
-- retain the active release unchanged.
+Required closure is not complete after one graph pass.
 
-Required evidence is never silently truncated.
+1. drain the required graph queue;
+2. discover every material conflict intersecting selected source memberships;
+3. add every missing compiled conflict-position cover source as required `conflict_context`;
+4. enqueue required graph context for those new sources;
+5. repeat until neither graph nor conflict phase adds anything;
+6. only then consider requested optional context.
 
-### 14.2 Optional context
+Conflict records are not graph edges and do not consume semantic graph depth, but conflict-added objects/paths/reasons/bytes count against their explicit bounds.
 
-For an explicit supporting/diagnostic request only:
+## 15. Release validation
 
-- process optional candidates in deterministic priority order;
-- stop immediately before the first candidate that would exceed a bound;
-- retain the complete required closure;
-- set `context_completeness: truncated_optional`;
-- emit `context_truncated` with only the safe configured/observed counts allowed by the design.
+Independent release validation must:
 
-## 15. Required closure and material-conflict fixed point
-
-Required closure is not complete after the required graph queue drains once.
-
-The Phase 2 runtime must compose graph traversal and material-conflict closure to a least fixed point:
-
-1. process required graph path states until the required queue is empty;
-2. identify every material conflict intersecting selected source memberships;
-3. add missing compiled conflict-position cover sources as required `conflict_context`;
-4. enqueue required graph context for each newly added source;
-5. repeat graph and conflict phases until neither adds a source/record;
-6. only then consider optional supporting/diagnostic traversal.
-
-Conflict records themselves are not graph edges and do not consume semantic graph depth, but conflict-added sources/paths/reasons/bytes count against the explicit bounds.
-
-The separate Phase 2 material-conflict appendix defines conflict build/runtime details.
-
-## 16. Release-time validation
-
-Release validation independently proves the context runtime can safely serve the release.
-
-At minimum:
-
-- validate every structural/semantic edge endpoint and direction;
-- validate all stable edge/occurrence identities and origin groups;
-- validate the closed context rule configuration against supported schema versions;
-- recompute required source covers for all rule-materializable targets used by release tests;
+- validate all structural/semantic endpoints/directions;
+- recompute edge/occurrence identity and provenance groups;
+- validate the closed context rule/configuration and endpoint classifications;
+- recompute target source covers used by conformance fixtures;
 - reject release-invalid cycles;
-- validate classification/type eligibility for rule endpoints;
-- prove the largest single required graph+conflict closure addressable by `get_clause` fits every configured depth/object/path/step/conflict/position/reason/byte bound;
-- verify context-related artifact/cache hashes in the release manifest;
-- run deterministic context fixtures before activation.
+- verify context artifact/cache/release identities;
+- prove the largest single required graph+conflict closure addressable by `get_clause` fits every depth/object/path/step/conflict/position/reason/byte bound;
+- run the complete deterministic traversal conformance and negative suites before activation.
 
-A release that cannot prove the single-clause required-closure bound is not activatable.
-
-## 17. Ordering and deduplication of final evidence subgraph
+## 16. Final subgraph ordering and lineage
 
 After fixed-point closure:
 
-- deduplicate source-backed evidence by exact release-scoped `source_id`;
-- deduplicate metadata-only targets by exact `(document_id, node_id)` identity;
-- preserve every accepted independent traversal path up to the per-object path bound;
-- preserve direct seed rank/role independently from context role;
-- never deduplicate by text similarity, clause number, document code, or normalized wording;
-- preserve actual document edition/status/jurisdiction/type on every attached item.
+- deduplicate source evidence only by exact release-scoped `source_id`;
+- deduplicate metadata-only targets by exact `(document_id,node_id)`;
+- preserve every accepted independent path within bounds;
+- preserve actual edition/status/jurisdiction/type;
+- never deduplicate by text similarity or clause label.
 
-Cross-document context never substitutes an active/newer edition for the exact stored edge target.
+Request assembly lineage records exact selection roles, origin seed IDs, accepted context paths/steps/origin groups/rule IDs, completeness, warnings, and conflict reasons through the Section 21 closed schema. It never mutates `lineage.json`.
 
-## 18. Runtime assembly lineage
+## 17. Shared service integration
 
-For every source-backed or metadata-only returned object, retain the exact request-scoped assembly reasons required by the Evidence Package schema:
+Required closure is one service used by Python, CLI, `search_evidence`, `get_clause`, and `get_context` where the requested families require it.
 
-- selection role (`retrieval_seed`, `expanded_context`, or `conflict_context` as applicable);
-- originating seed source IDs;
-- complete accepted context paths;
-- each path step's stable `edge_id`, canonical endpoints, relation type, and validated `origin_groups`/occurrence IDs;
-- any conflict inclusion reason where applicable;
-- context completeness state and typed warnings.
+The clause resource uses the exact Section 22 context-complete clause-resource contract. The raw source resource remains a separate Section 22.3 contract returning only source `original_text`; it does **not** run or wrap required closure.
 
-This request-specific lineage never mutates immutable release `lineage.json`.
+Adapters cannot reimplement traversal or omit required context for presentation convenience.
 
-## 19. Shared service integration
+## 18. Evaluation and conformance
 
-Required closure must be one shared service layer used by:
+Phase 2 follows Section 29.4 exactly:
 
-- Python API;
-- CLI evidence commands;
-- MCP `search_evidence`;
-- MCP `get_clause`;
-- MCP `get_context` where enabled families require required closure;
-- clause/source resource projections that the design exposes as context-complete evidence surfaces.
+- required context, lineage paths, source status, and deterministic ordering: **zero failures across the complete versioned traversal conformance suite**;
+- prohibited, unresolved, guessed, or wrong-edition traversal: **zero accepted edges across the complete versioned negative suite**.
 
-Adapters must not reimplement traversal or silently omit context to fit a presentation format.
+These are deterministic complete-suite count gates, not invented probabilistic held-out 100% gates.
 
-## 20. Test matrix
+Fixtures cover every required rule, exact/ambiguous/unresolved resolution, reconvergent paths, cycles, target materialization, exact max/one-over bounds, graph-conflict fixed point, and multi-seed overflow.
 
-### 20.1 Rule tests
-
-Test every v0.1 required rule in both positive and negative directions:
-
-- applicability forward;
-- dependency forward;
-- reverse exception;
-- exception forward target;
-- definition -> scope;
-- table-row -> whole table + nearest clause;
-- note/footnote -> nearest source-bearing parent.
-
-### 20.2 Resolution tests
-
-Test:
-
-- resolved exact same-document target;
-- resolved cross-document target;
-- wrong-edition same clause label not followed;
-- unresolved document/clause/node;
-- ambiguous edition/node;
-- authority-insufficient occurrence;
-- release-tier critical vs standard behavior.
-
-### 20.3 Path tests
-
-Test:
-
-- reconvergent independent paths retained;
-- path-state dedup prevents duplicate identical state;
-- target-only visited-set regression fixture;
-- allowed semantic cycle warning/stop;
-- forbidden structural/governing cycle release failure;
-- deterministic queue order under shuffled DB insertion/order.
-
-### 20.4 Materialization tests
-
-Test:
-
-- exact atomic node source;
-- complete clause/subtree source cover;
-- whole-table source projection;
-- empty governing scope metadata target;
-- no eligible source -> incomplete/failure behavior;
-- no broad unrelated chunk chosen when a scope-contained source exists.
-
-### 20.5 Bound tests
-
-For every numeric bound test exact maximum and first over-limit value.
-
-Required over-limit cases return one `context_limit_exceeded` tool error and no partial success.
-
-Optional over-limit cases retain required closure and return deterministic optional truncation only where optional traversal was explicitly requested.
-
-### 20.6 Integration fixtures
-
-Include at minimum:
-
-- requirement + applicability;
-- requirement + exception + exception condition;
-- definition + governing scope;
-- table row + headers/units + clause;
-- dependency chain to depth boundary;
-- cross-document dependency with exact edition;
-- unresolved required reference;
-- unclassified node needed by required rule;
-- material conflict side that introduces another required context path;
-- several retrieval seeds whose combined closure exceeds a bound.
-
-## 21. Acceptance criteria
+## 19. Acceptance criteria
 
 Phase 2 required-context closure is complete only when:
 
-1. every ordinary exact/lexical evidence seed runs the versioned required rule set;
-2. only release-validated structural/resolved semantic edges are navigable;
-3. traversal uses the exact deterministic priority key;
-4. traversal deduplicates complete path state, not target alone;
-5. cycle handling is deterministic and bounded;
-6. source-backed targets are materialized only from canonical in-scope source cover;
-7. valid empty structural targets use metadata-only `context_targets`, never fabricated text;
-8. all exact numeric bounds are enforced with the required-vs-optional semantics above;
-9. required graph/context plus material conflicts reach a fixed point before success;
-10. a required over-limit condition returns `context_limit_exceeded` with no partial Evidence Package;
-11. unresolved required information is visible through completeness/warnings rather than guessed;
-12. exact document/edition/status identity is preserved for every attached object;
-13. request-scoped assembly lineage retains every accepted path/reason within bounds;
-14. release validation independently proves the single-clause required-closure bound;
-15. Python/CLI/MCP call the same traversal/evidence service;
-16. the regression corpus demonstrates that required scope/applicability/definitions/dependencies/exceptions/table context are never lost from applicable ordinary evidence results.
+1. every ordinary exact/lexical evidence seed runs the current versioned required rule set;
+2. only release-validated navigable edges are followed;
+3. exact queue ordering/path-state dedup/cycle rules are deterministic;
+4. source-backed targets use canonical in-scope source cover;
+5. empty targets remain metadata-only;
+6. all current numeric bounds and required-vs-optional semantics are enforced;
+7. graph/conflict closure reaches the least fixed point;
+8. required overflow returns no partial Evidence Package;
+9. unresolved required facts are visible, never guessed;
+10. document/edition/status identity is preserved;
+11. assembly lineage retains exact accepted paths/reasons;
+12. release validation proves the single-clause closure bound;
+13. Python/CLI/MCP evidence tools share one traversal service;
+14. the complete deterministic traversal and negative conformance suites have zero failures/zero prohibited accepted edges;
+15. no Phase 3 dense/RRF or Phase 4 ordinary supporting-context implementation is pulled into this Phase 2 plan.
