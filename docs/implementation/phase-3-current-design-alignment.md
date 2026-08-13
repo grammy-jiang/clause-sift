@@ -3,232 +3,195 @@
 **Project:** ClauseSift  
 **Phase:** 3 — Hybrid Retrieval  
 **Status:** Normative Phase 3 implementation-plan clarification  
-**Current product-intent authority:** `docs/design-brief.md`  
-**Current design rulebook:** `docs/design-principles.md`  
-**Current detailed design authority:** `docs/design.md`  
+**Product-intent authority:** `docs/design-brief.md`  
+**Design rulebook:** `docs/design-principles.md`  
+**Detailed design authority:** `docs/design.md`  
 **Companion plan:** `docs/implementation/phase-3-hybrid-retrieval.md`
 
 ## 1. Purpose and precedence
 
-While the Phase 3 PR was under review, `master` advanced from the Phase 2 merge commit to a new design baseline that added `docs/design-brief.md`, added `docs/design-principles.md`, and revised `docs/design.md` implementation-phase boundaries.
+This document aligns the Phase 3 implementation plan with the current repository design authority while preserving the implementation-phase ownership actually defined by `docs/design.md` and the already merged Phase 2 implementation plan.
 
-This clarification aligns the Phase 3 plan with that **current** design baseline without adding implementation work owned by another phase.
+Where an earlier Phase 3 document claims that Phase 2 already implemented runtime required-context traversal, material-conflict closure, or final context-complete evidence tools, that claim is superseded by this document.
 
-Where the Phase 3 main plan or earlier Phase 3 clarification implies a different lower-phase prerequisite, public-pipeline boundary, or Phase 4 handoff, this document is authoritative.
+This clarification changes only Phase 3 planning. It does not add Phase 2 implementation work and does not pull Phase 4 implementation into Phase 3.
 
-It does **not** amend the already merged Phase 2 implementation-plan documents. Any separate Phase 2 documentation alignment required because the governing design changed after Phase 2 merged must be handled outside this Phase 3 PR.
+## 2. Design authority hierarchy
 
-## 2. Current design authority hierarchy
+Phase 3 must remain consistent with all three design levels:
 
-Phase 3 implementation decisions must remain consistent with all three current design levels:
+1. `docs/design-brief.md` defines product intent;
+2. `docs/design-principles.md` defines durable decision rules;
+3. `docs/design.md` defines technical contracts and implementation ownership.
 
-1. `docs/design-brief.md` owns product intent;
-2. `docs/design-principles.md` owns durable decision rules;
-3. `docs/design.md` owns exact technical contracts, implementation choices, limits, gates, and tests.
+The brief and principles require the finished product to preserve required context and material conflicts. They do not, by themselves, prove that those runtime capabilities were already implemented by an earlier phase.
 
-For Phase 3, the particularly relevant design principles are:
+For implementation sequencing, `docs/design.md` remains authoritative.
 
-- DP-01 — original sources remain authoritative;
-- DP-03 — identity and provenance are deterministic;
-- DP-04 — required context is correctness;
-- DP-06 — compile offline and serve read-only;
-- DP-07 — canonical evidence is separate from acceleration;
-- DP-08 — publish only complete verified releases;
-- DP-09 — components remain replaceable behind contracts;
-- DP-10 — validate before use and fail closed;
-- DP-11 — work is bounded and terminal;
-- DP-13 — exact and lexical retrieval remain first-class;
-- DP-14 — models are bounded assistants;
-- DP-15 — Python, CLI, and MCP expose one strict evidence contract;
-- DP-16 — behavior is versioned and deterministic;
-- DP-17 — representative evidence selects components;
-- DP-18 — proof matches the claim;
-- DP-20 — optimize only after quality gates pass.
+## 3. Actual Phase 2 prerequisite available to Phase 3
 
-No Phase 3 optimization or semantic-retrieval improvement may weaken required context, edition safety, source fidelity, or public evidence semantics.
+The merged Phase 2 plan provides the deterministic exact/lexical retrieval foundation that Phase 3 extends, including:
 
-## 3. Revised Phase 2 prerequisite inherited by Phase 3
+- approved manifests and canonical document identity;
+- canonical nodes/chunks/sources and edition-safe identities;
+- page/source provenance and deterministic citations;
+- SQLite catalog persistence and release validation;
+- exact clause/direct lookup primitives;
+- lexical retrieval primitives;
+- immutable release, activation, rollback, integrity, and runtime admission contracts;
+- Phase 2 build/source lineage;
+- basic metadata/list/page/release runtime/MCP surfaces that do not require final context closure.
 
-The current `docs/design.md` Phase 2 contract now includes, in addition to the earlier exact/lexical baseline:
+Phase 2 deliberately does **not** provide the final runtime required-context traversal, material-conflict fixed-point closure, or context-complete evidence-facing tools.
 
-- deterministic required Evidence Graph context closure;
-- deterministic material-conflict closure;
-- basic Python, CLI, and MCP retrieval interfaces that already return the required context-complete evidence semantics for the first usable path.
+Phase 3 must not pretend otherwise.
 
-Therefore Phase 3 must treat the following as **lower-phase prerequisites**, not Phase 4 work:
+## 4. Phase 3 responsibility
 
-- required parent scope;
-- applicability context;
-- dependencies;
-- definitions;
-- exceptions;
-- required table context;
-- every material conflict side;
-- the bounded required-context traversal/closure rules needed to produce a safe first-release Evidence Package;
-- the shared Python/CLI/MCP runtime service layer that exposes those semantics.
+Phase 3 changes candidate retrieval only.
 
-Phase 3 does not reimplement these lower-phase rules. It consumes them through their stable service/catalog contracts.
-
-## 4. Correct Phase 3 runtime composition
-
-The Phase 3 hybrid path changes **candidate retrieval**, not evidence meaning.
-
-The Phase 3 runtime composition is:
+Its runtime responsibility is:
 
 ```text
 validated query
-  -> deterministic query analysis / mode resolution
+  -> deterministic query preprocessing and analysis
   -> exact and/or lexical and/or dense candidate retrieval
   -> lexical+dense RRF where hybrid is selected
-  -> deterministic retrieval-seed ordering
-  -> inherited Phase 2 required-context closure
-  -> inherited Phase 2 material-conflict closure
-  -> inherited strict Evidence Package serialization
-  -> Python / CLI / MCP response
+  -> deterministic canonical hybrid seed candidate set
+  -> strict Phase 4 handoff
 ```
 
-Dense similarity and RRF end at the retrieval-seed boundary. They do not authorize omission, weakening, or reinterpretation of the inherited required-context and conflict-closure stages.
+The hybrid seed set retains canonical document/chunk/source identity and complete retrieval provenance so later stages can perform context and conflict closure without reconstructing or guessing identity.
 
-If the inherited required closure cannot complete inside its declared bounds, Phase 3 follows the same typed failure/incomplete-required behavior as the current first-release contract. It must not return a semantically incomplete hybrid success merely because candidate retrieval succeeded.
+Dense similarity and RRF are retrieval metadata only. They never create source facts, applicability, precedence, context relationships, or citations.
 
-## 5. Public Phase 3 hybrid capability
+## 5. Phase 3 public-surface boundary
 
-The current design no longer supports the main plan's earlier implication that Phase 3 hybrid behavior should remain only an internal diagnostic service until Phase 4.
+Phase 3 may expose internal/service diagnostics needed to test hybrid retrieval, but it must not advertise a final success contract that claims context-complete Evidence Package semantics before the Phase 4 closure pipeline exists.
 
-Phase 3 may and should extend the **existing shared retrieval service** with the validated hybrid candidate path so that the already established Python, CLI, and MCP interfaces can use it without changing evidence semantics.
+In particular, Phase 3 must not newly claim successful final implementations of:
 
-The public/service behavior must preserve:
+- context-complete `search_evidence`;
+- context-complete `get_clause`;
+- `get_context`;
+- final clause/source evidence resources;
+- final Evidence Package assembly;
+- complete query-specific assembly lineage;
+- material-conflict fixed-point closure.
 
-- one request-validation path;
-- one metadata-filter contract;
-- one release identity;
-- one canonical evidence/source identity system;
-- one required-context/material-conflict closure implementation;
-- one Evidence Package schema and serializer;
-- one typed error/warning contract appropriate to the current design;
-- deterministic citations and lineage.
+Existing Phase 2 exact/lexical primitives and metadata/page/release surfaces remain available according to their own contracts.
 
-Hybrid support must not create a separate "semantic search API" with weaker context or serialization guarantees.
-
-## 6. Retrieval mode implications
-
-Phase 3 query classification and mode resolution operate above the inherited evidence-assembly pipeline.
+## 6. Query mode implications
 
 ### 6.1 Exact-dominant requests
 
-Exact identifiers, explicit clauses, model numbers, and other exact anchors remain eligible for exact/lexical-first behavior and must remain model-free where the selected mode requires no semantic channel.
+Exact identifiers, explicit clauses, product/model numbers, and other strong anchors remain eligible for exact/lexical-first processing and remain model-free when the chosen path does not require dense retrieval.
 
 ### 6.2 Hybrid natural-language requests
 
-A validated hybrid request may use:
+A Phase 3 hybrid request may use:
 
 - lexical retrieval;
 - current-query embedding;
-- exact dense retrieval;
-- RRF;
+- exact dense retrieval over the memory-mapped chunk matrix;
+- deterministic RRF;
 - deterministic retrieval-seed ordering.
 
-The resulting seeds then undergo the same required context and conflict closure as any other successful retrieval path.
+The result of Phase 3 is the strict seed handoff, not a claim that required graph context has already been attached.
 
 ### 6.3 Auto resolution
 
-`auto` may select only capabilities present in both the installed runtime and active release. When it selects hybrid retrieval, the final result remains subject to the same required-context and conflict closure as exact/lexical retrieval.
+`auto` may select only capabilities actually available in the active release/runtime. A dense-capability failure may fall back only where the detailed design explicitly permits `auto` fallback, with the required typed warning.
 
 ### 6.4 Explicit hybrid failure
 
-If an explicit hybrid request cannot execute because the active release or runtime lacks the validated dense capability, it must fail under the design's typed capability/failure contract rather than silently relabel a lexical-only result as hybrid.
+An explicit hybrid request whose dense capability cannot execute fails through the design's typed capability contract rather than silently becoming lexical-only.
 
-## 7. Correct Phase 4 handoff
+## 7. Phase 4 handoff
 
-The current `docs/design.md` Phase 4 scope is **High-accuracy retrieval** and now consists of:
+Phase 4 consumes the Phase 3 seed candidate set and owns the later high-accuracy/evidence-completeness pipeline defined by the detailed design, including as applicable:
 
 - cross-encoder reranking;
-- **supporting-context expansion** for high-accuracy retrieval;
-- improved tables and cross-references;
-- expanded typed-warning and refusal evaluation for high-accuracy retrieval.
+- deterministic required Evidence Graph context traversal;
+- material-conflict closure;
+- supporting-context expansion;
+- improved table/cross-reference handling;
+- final Evidence Package assembly;
+- final context-complete evidence-facing Python/CLI/MCP semantics;
+- high-accuracy warning/refusal evaluation.
 
-Phase 4 does **not** newly introduce the deterministic required-context or material-conflict closure needed for ordinary safe evidence. Those are already lower-phase correctness requirements.
+Phase 3 must provide a versioned handoff containing enough canonical identity and retrieval provenance for Phase 4 to perform these operations deterministically.
 
-Accordingly, every Phase 3 statement that says or implies any of the following is superseded:
+## 8. Phase 3 evaluation consequence
 
-- "required Evidence Graph traversal begins in Phase 4";
-- "final context-complete evidence tools cannot be advertised until Phase 4";
-- "Phase 3 hybrid results should remain diagnostic/internal solely because required context is unavailable";
-- "Phase 4 owns ordinary required-context closure".
+Phase 3 blocking evaluation focuses on the retrieval stage that Phase 3 actually implements.
 
-The correct handoff is:
+Required slices include:
 
-```text
-Phase 3
-  -> validated exact/lexical/dense candidate retrieval
-  -> deterministic lexical+dense RRF
-  -> deterministic query classification/mode resolution
-  -> inherited required context + material conflicts
-  -> ordinary strict Evidence Package
+- dense Recall@20 / Top-5;
+- hybrid Recall@20 / Top-5;
+- lexical-vs-dense complementarity;
+- exact-anchor preservation;
+- wrong-edition/wrong-document resistance;
+- metadata-filter correctness;
+- deterministic RRF ordering;
+- query-classifier/routing correctness;
+- query-preprocessing identity/invalidation correctness;
+- source/chunk/document identity preservation in the seed handoff;
+- retrieval-provenance completeness.
 
-Phase 4 adds
-  -> cross-encoder reranking
-  -> additional supporting context for high_accuracy
-  -> higher-accuracy table/cross-reference handling
-  -> expanded warning/refusal evaluation
-```
+Phase 3 does **not** claim blocking proof of context closure, conflict fixed-point completeness, final Evidence Package equivalence, or refusal/answerability behavior that has not yet been implemented.
 
-## 8. Evaluation consequences
+Those become blocking when the owning Phase 4 capability exists.
 
-Phase 3 retrieval evaluation must not measure candidate recall in isolation and then ignore downstream evidence correctness.
+## 9. Release and lineage consequence
 
-In addition to lexical/dense/hybrid Recall@20 and Top-5 candidate gates, integration/regression suites must verify that using the hybrid channel does not alter or drop:
+Phase 3 release identity adds the behavior-bearing inputs introduced by hybrid retrieval, including:
 
-- required parent scope;
-- applicability;
-- dependencies;
-- definitions;
-- exceptions;
-- required table context;
-- material conflict sides;
-- deterministic citations;
-- source identity;
-- edition identity;
-- required typed warnings/failures;
-- Evidence Package ordering and lineage rules inherited from the current lower-phase runtime.
+- embedding model and model-asset identity;
+- deterministic embedding/query preprocessing identity;
+- embedding artefact identity;
+- exact dense backend/configuration;
+- query-analysis/classifier configuration;
+- RRF/fusion configuration;
+- candidate-pool configuration;
+- relevant dependency/toolchain identity.
 
-Hybrid retrieval may change which seeds are found and their candidate rank. It may not change the deterministic meaning attached to a selected seed.
+Phase 3 extends release build lineage with the corresponding derived retrieval artefacts and channel provenance.
 
-## 9. Release and lineage consequences
-
-Phase 3 release identity still adds embedding, model-asset, dense-backend, RRF, and query-classifier behavior-bearing inputs as described by the Phase 3 plan and clarifications.
-
-The release must also remain compatible with the already compiled lower-phase context/conflict rules and artifacts required by current `docs/design.md`.
-
-Phase 3 lineage adds retrieval-channel and derived-artifact provenance without creating a second evidence lineage model.
+It does not invent Phase 4 context-path/assembly lineage early.
 
 ## 10. Phase-boundary regression tests
 
-Add Phase 3 integration tests proving:
+Add Phase 3 tests proving:
 
-1. the same exact/lexical query before and after enabling Phase 3 retains required-context/material-conflict semantics;
-2. a hybrid natural-language query whose direct seed is an isolated requirement receives the inherited required parent/applicability/exception context;
-3. a dense hit intersecting one side of a material conflict cannot produce a one-sided final package;
-4. hybrid candidate ranking cannot remove a required conflict side;
-5. a context-limit failure remains a failure rather than degrading to a context-incomplete hybrid success;
-6. Python, CLI, and MCP project the same hybrid result from the shared service layer;
-7. disabling dense capability leaves exact/lexical evidence semantics unchanged;
-8. Phase 3 does not invoke Phase 4 supporting-context or reranker behavior.
+1. hybrid seed retrieval preserves canonical `document_id`, `chunk_id`, and `source_id`;
+2. exact anchors are never silently replaced by semantic near-matches;
+3. different editions remain distinct through lexical/dense fusion;
+4. metadata filters apply consistently to lexical and dense candidate paths;
+5. all contributing channel ranks/scores/artefact hashes remain attributable after deduplication/fusion;
+6. identical release/query/configuration inputs produce identical seed ordering;
+7. disabling dense capability leaves Phase 2 exact/lexical primitives unchanged;
+8. Phase 3 does not invoke or claim Phase 4 context traversal, conflict closure, reranker, supporting-context, or final Evidence Package behavior;
+9. the Phase 4 handoff has a strict versioned schema and all canonical IDs/provenance needed for later closure.
 
 ## 11. Phase 3 acceptance corrections
 
-Phase 3 is not complete unless, in addition to the existing Phase 3 criteria:
+Phase 3 is complete only when:
 
-1. the hybrid path composes with the inherited required-context and material-conflict closure;
-2. hybrid retrieval is available through the existing shared retrieval service/interfaces where the current design exposes retrieval modes;
-3. exact/lexical first-class behavior remains intact;
-4. candidate retrieval never bypasses required context or conflict completeness;
-5. downstream Evidence Package semantics remain identical across exact/lexical/hybrid paths except for retrieval provenance/rank metadata that legitimately differs;
-6. current Phase 4 responsibility is described as reranking plus **supporting** context/high-accuracy improvements, not ordinary required-context closure;
-7. no Phase 2 implementation detail is added to this PR beyond declaring the current prerequisite contract.
+1. evaluated chunk embeddings are built and release-validated;
+2. memory-mapped exact dense retrieval is deterministic and safe;
+3. deterministic query preprocessing/classification is release-bound;
+4. lexical+dense RRF is deterministic and evaluation-backed;
+5. exact and lexical retrieval remain first-class;
+6. hybrid seed retrieval preserves edition-safe canonical identity and complete retrieval provenance;
+7. Phase 3 release/cache/lineage invalidation includes every behavior-bearing hybrid input;
+8. the Phase 4 seed handoff is strict and versioned;
+9. Phase 3 does not advertise context-complete evidence semantics that require Phase 4;
+10. all Phase 3-specific release and regression gates pass.
 
-## 12. Separate lower-phase alignment note
+## 12. Scope discipline
 
-The governing design changed after the Phase 2 implementation-plan PR had already merged. This Phase 3 clarification does not silently rewrite Phase 2 history and does not expand the current PR into Phase 2 scope.
+If a reviewer identifies a missing capability that is necessary only for Phase 4 context traversal, reranking, conflict closure, supporting context, final Evidence Package assembly, or refusal/high-accuracy behavior, record/defer it to Phase 4 rather than expanding this Phase 3 PR.
 
-Before implementation execution relies on the complete plan set, the repository should separately reconcile any merged Phase 2 implementation-plan text that still reflects the older phase boundary. That reconciliation must be its own phase-scoped documentation change and review, not a Phase 3 review fix.
+If the detailed design itself later changes implementation ownership and moves one of those capabilities earlier, that must be an explicit design/phase-boundary change before the Phase 3 plan is expanded.
