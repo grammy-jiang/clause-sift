@@ -362,9 +362,9 @@ semantic retrieval is required. It must:
 - build and validate the canonical catalog, evidence lineage, static review
   reports, and an immutable release;
 - perform exact clause lookup and lexical search with metadata filters;
-- return original evidence, deterministic citations, and relevant parent or
-  adjacent context;
-- expose core retrieval through CLI and MCP;
+- return original evidence and deterministic citations, then run bounded
+  required-context and material-conflict closure for every result;
+- expose core retrieval through the shared Python, CLI, and MCP interfaces;
 - reject invalid relationships, unsafe paths or serialization, corrupt
   artifacts, and unsupported protocol inputs;
 - retain and atomically restore a previous valid release;
