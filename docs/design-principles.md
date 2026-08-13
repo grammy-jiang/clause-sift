@@ -63,8 +63,8 @@ When principles or goals compete, resolve the tradeoff in this order:
 1. Protect source fidelity, integrity, safety, and professional-review
    boundaries.
 2. Preserve retrieval and contextual correctness.
-3. Preserve traceability and reproducibility.
-4. Improve query speed without weakening the first three priorities.
+3. Improve query speed without weakening the first two priorities.
+4. Preserve traceability and reproducibility.
 5. Prefer operational simplicity and replaceable components.
 6. Optimize build speed last.
 
