@@ -781,7 +781,7 @@ Any change to a held-out label after a model or retrieval system has been evalua
 
 ## 19. Work package 0.15: Evaluation tooling
 
-Phase 0 should implement only tooling needed to validate and manage the corpus itself. Retrieval scoring that depends on later runtime outputs may initially be stubbed behind stable input formats.
+Phase 0 should implement only tooling needed to validate and manage the corpus itself. Retrieval scoring that depends on later runtime outputs is outside this phase.
 
 ### 19.1 Required Phase 0 utilities
 
@@ -802,27 +802,21 @@ Implement deterministic utilities for:
 - corpus/version consistency checks;
 - safe generation of static summary reports without embedding untrusted data as active content.
 
-### 19.2 Future-facing result adapter
+### 19.2 Ground-truth export boundary
 
-Define a simple evaluation-result input contract that later phases can populate with:
+Phase 0 defines only the ground-truth records and safe exports required to hand the corpus to later test harnesses. A Phase 0 export may include:
 
-- query ID;
-- release/build identity;
-- returned document/source IDs;
-- ranks;
-- retrieval channel;
-- context paths;
-- warnings;
-- conflict records;
-- citations;
-- observed answerability/refusal disposition, including whether the system answered, refused, returned insufficient evidence, or reported ambiguity/invalid input as applicable;
-- generated claim records for answer-producing clients, with stable claim IDs and claim-to-evidence links sufficient for blinded claim-level support grading;
-- claim-level grader labels/provenance when human evidence-support or unsupported-assertion evaluation has been performed;
-- latency metadata where relevant.
+- question ID;
+- corpus, question-set, rubric, and label-set versions;
+- expected answerability/refusal class;
+- expected evidence-label IDs;
+- expected context, classification, and conflict label IDs where applicable;
+- split and stratum tags;
+- reviewer and adjudication provenance.
 
-The contract must support the design-owned evaluators without forcing later phases to invent incompatible result extensions. In particular, it must be sufficient to derive the refusal confusion matrix and to retain the claim/evidence observations used for evidence-support and unsupported-assertion rates. Generated prose is not itself ground truth, and claim-level human labels remain separate reviewed evaluation records.
+Phase 0 does **not** define the observed runtime-result shape, Evidence Package extensions, claim-to-evidence result serialization, returned classification projections, returned context-path projections, ranking telemetry, or latency telemetry. Those are owned by the implementation phase that first produces the corresponding runtime behaviour and must be specified there against the authoritative design.
 
-Do not implement fake runtime output merely to complete Phase 0. The purpose is to prevent every later phase from inventing a different evaluator interface.
+The Phase 0 boundary is therefore a versioned ground-truth join contract, not a future runtime or evaluator API. Later harnesses can join observations back to Phase 0 by stable question and label identities without requiring this phase to predict the output schema of Phase 2, Phase 3, or Phase 4.
 
 ### 19.3 Determinism
 
@@ -989,7 +983,7 @@ Phase 0 implementation is accepted only when all of the following are true.
 11. Statistical tooling correctly implements one-sided 95% Wilson lower bounds and reports numerator/denominator.
 12. The release-gate expansion plan identifies the minimum 150-case and 60-case requirements for the applicable probabilistic metrics, keeps every independently reported conflict state/code family separate, and documents stratification.
 13. Development, benchmark, held-out, and calibration splits have explicit leakage rules.
-14. The evaluator result contract can carry observed refusal/answerability outcomes and claim-to-evidence records needed by the design's end-to-end metrics.
+14. Phase 0 ground-truth exports carry the expected answerability/refusal, evidence, context, classification, and conflict label identities needed for later evaluators; observed system-result adapters remain explicitly out of scope.
 15. Corpus validation tests pass.
 16. Markdown and repository documentation checks pass in CI.
 17. A Phase 0 readiness report lists any remaining coverage gaps and does not claim release-gate readiness unless the sample requirements have actually been met.
@@ -1008,6 +1002,7 @@ Phase 0 must not:
 - create final conflict records without source support;
 - build a vector index;
 - implement CLI/MCP behaviour;
+- define observed runtime/evaluator result schemas owned by later phases;
 - treat generated labels as source authority;
 - infer legal enforceability;
 - commit licensed standards merely to simplify CI;
