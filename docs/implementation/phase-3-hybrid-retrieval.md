@@ -4,208 +4,178 @@
 **Phase:** 3 of the design-defined implementation sequence  
 **Status:** Implementation plan  
 **Primary design authority:** `docs/design.md`  
-**Phase objective:** Extend the merged Phase 2 exact/lexical retrieval baseline with benchmarked chunk embeddings, deterministic memory-mapped exact dense retrieval, lexical+dense reciprocal-rank fusion, deterministic query classification, and expanded retrieval evaluation, while composing with the inherited Phase 2 required-context/material-conflict evidence pipeline—without implementing Phase 4 cross-encoder reranking, additional supporting-context expansion, high-accuracy table/cross-reference improvements, or expanded high-accuracy warning/refusal evaluation.
+**Product intent:** `docs/design-brief.md`  
+**Design principles:** `docs/design-principles.md`  
 
-## 1. Purpose
+## 1. Objective
 
-Phase 3 adds the first semantic retrieval path to ClauseSift while preserving the design's accuracy-first, deterministic, source-grounded architecture.
+Phase 3 adds evaluated semantic retrieval to ClauseSift without changing the authority, identity, edition-safety, context-completeness, conflict, citation, release, or interface semantics established by the lower-phase design.
 
-Phase 2 already establishes the authoritative corpus identity, canonical document model, chunk/source identity, SQLite catalog, exact lookup, lexical retrieval, deterministic citations, deterministic required Evidence Graph context closure, material-conflict closure, the shared Python/CLI/MCP evidence interfaces, immutable release lifecycle, release lineage, and the common runtime baseline. Phase 3 must build on those contracts rather than introduce parallel identities, parallel metadata stores, a second evidence pipeline, or a second retrieval model.
+The Phase 3 implementation must deliver:
 
-The core Phase 3 question is not merely whether embeddings can retrieve semantically similar text. The phase must prove that semantic retrieval improves evidence recall on real engineering questions without degrading edition safety, exact-identifier behavior, deterministic release construction, source traceability, required-context completeness, conflict completeness, runtime safety, or the ability to reproduce a retrieval decision from immutable release artifacts.
+1. a replaceable embedding-provider contract;
+2. an evidence-backed embedding-model selection process;
+3. exactly one deterministic release embedding for every persisted chunk;
+4. a safe memory-mapped exact dense-search implementation;
+5. deterministic lexical+dense reciprocal-rank fusion (RRF);
+6. deterministic query preprocessing, analysis, and retrieval-path classification;
+7. Phase 3-specific held-out confirmation and retry governance;
+8. Phase 3 release/cache/model-asset/lineage integration;
+9. expanded regression evaluation proving hybrid retrieval improves recall without weakening exact/lexical and evidence correctness.
 
-Phase 3 therefore has five design-defined outcomes:
+Phase 3 does not add cross-encoder reranking or other Phase 4 high-accuracy behavior.
 
-1. select an embedding model using ClauseSift's own multilingual engineering evaluation corpus;
-2. generate exactly one release-bound embedding for every persisted chunk;
-3. implement deterministic exact dense search over a memory-mapped chunk matrix;
-4. fuse lexical and dense rankings using a versioned reciprocal-rank-fusion contract;
-5. classify queries deterministically so the runtime can distinguish exact-style and natural-language retrieval needs while preserving the shared evidence contract.
+## 2. Blocking lower-phase prerequisite
 
-The phase also expands regression evaluation so the selected embedding, dense-search, fusion, and query-analysis choices are supported by evidence rather than preference.
+Current `docs/design.md` assigns the following ordinary correctness baseline to **Phase 2**:
 
-## 2. Phase boundary
+- deterministic required Evidence Graph context closure;
+- deterministic material-conflict closure;
+- ordinary strict Evidence Package assembly;
+- basic Python, CLI, and MCP retrieval interfaces using that evidence contract.
 
-Phase 3 must remain independently implementable and reviewable. Review comments, fixes, replies, and acceptance criteria for this phase must remain within the Phase 3 boundary.
+The already merged Phase 2 implementation-plan set predates that design-boundary change and does not yet describe the full current Phase 2 closure/evidence-service implementation. That mismatch is a lower-phase corrective gap.
 
-### 2.1 In scope
+Therefore:
+
+- Phase 3 must **not** implement that missing Phase 2 work inside this phase;
+- Phase 3 must **not** pretend the stale Phase 2 plan already implements it;
+- Phase 3 must **not** move ordinary closure to Phase 4;
+- a separately reviewed Phase 2 corrective plan/implementation is a **blocking prerequisite for release-capable Phase 3 runtime integration, downstream evidence-semantics confirmation, activation, and Phase 3 completion**.
+
+Offline Phase 3 benchmark/harness work may proceed earlier against immutable canonical chunk fixtures, provided it does not claim a release-capable hybrid evidence path.
+
+Once the corrected Phase 2 baseline exists, Phase 3 consumes it through stable service/catalog contracts.
+
+## 3. Phase boundary
+
+### 3.1 In scope
 
 Phase 3 implements and validates:
 
-- an embedding-provider interface that does not leak a specific model into the canonical data model;
-- candidate embedding-model benchmarking on the Phase 0/Phase 2 evaluation corpus;
-- multilingual and cross-language embedding evaluation;
-- deterministic `embedding_text` construction from Phase 2 chunks;
-- exactly one embedding row per persisted chunk;
-- a versioned chunk-vector row-order contract;
-- deterministic embedding artifact generation;
-- a safe release artifact format for the chunk matrix;
-- matrix manifest metadata and release validation;
-- NumPy memory-mapped exact dense search as the default small/medium-corpus implementation;
-- an explicit abstraction boundary allowing later FAISS exact or validated ANN implementations without changing public evidence identity;
-- runtime query embedding for the current query only;
-- lazy query-model loading consistent with the common runtime lifecycle already established by the design;
-- dense candidate generation and deterministic source/chunk mapping;
-- metadata filtering before or during candidate acceptance without edition substitution;
-- lexical+dense candidate deduplication;
-- versioned reciprocal-rank fusion;
-- deterministic tie-breaking and total candidate ordering;
-- per-channel retrieval provenance integrated into the existing Evidence Lineage/evidence-service contract;
-- deterministic query feature extraction;
-- deterministic query classification for exact-style versus natural-language/hybrid retrieval needs;
-- resolution of the best Phase 3-capable retrieval path through the existing shared retrieval service;
-- composition of hybrid retrieval seeds with the inherited required-context and material-conflict closure;
-- expanded retrieval regression evaluation;
-- dense/hybrid quality gates and hard-negative coverage derived from the design's existing retrieval gates;
-- cold/warm/model-free performance measurement for the embedding path;
-- release/cache invalidation for embedding and vector artifacts;
-- Phase 3 release assembly, validation, activation, and rollback integration;
-- a clear handoff to Phase 4.
+- embedding-provider interface and safe provider implementation;
+- deterministic `embedding_text` projection;
+- multilingual/cross-language engineering embedding benchmark;
+- model selection and immutable decision record;
+- one vector per persisted chunk;
+- fixed v0.1 `embeddings.f16.npy` release artifact;
+- deterministic vector row ordering;
+- safe NumPy artifact validation and read-only memory mapping;
+- exact dense search;
+- deterministic dense top-K ordering;
+- canonical source/chunk mapping and metadata filtering;
+- current-query embedding only at runtime;
+- supervised/lazy query-model loading through the common runtime lifecycle;
+- lexical+dense deduplication by canonical evidence identity;
+- deterministic RRF;
+- deterministic query preprocessing and feature extraction;
+- deterministic query classification/path resolution;
+- Phase 3-specific held-out campaign governance;
+- Phase 3 cache, release, model-asset, and lineage identity;
+- comparative lexical/dense/hybrid regression evaluation;
+- inherited evidence-semantics integration testing after the Phase 2 corrective prerequisite exists;
+- cold/warm/model-free performance measurement;
+- release validation, activation, and rollback integration.
 
-### 2.2 Out of scope
+### 3.2 Out of scope
 
-Phase 3 must **not** implement or pull forward:
+Phase 3 does not implement:
 
+- the separately owned Phase 2 corrective context/conflict closure work;
 - cross-encoder reranking;
-- Phase 4 `high_accuracy` candidate reranking;
-- additional supporting/diagnostic context expansion beyond the inherited Phase 2 required-context and material-conflict closure;
-- reimplementation, weakening, bypass, or alternate semantics for the inherited required-context/material-conflict closure;
-- new semantic relationship extraction merely to improve dense search;
-- LLM-based query classification;
-- LLM-based query rewriting as an authoritative retrieval step;
-- arbitrary generated query expansion that becomes source authority;
-- approximate nearest-neighbour search solely because it is conventional;
-- a permanently running vector database;
+- Phase 4 `high_accuracy` reranking;
+- Phase 4 supporting-context expansion;
+- Phase 4 table/cross-reference improvements;
+- Phase 4 expanded warning/refusal evaluation;
+- ANN solely because it is conventional;
+- a permanent vector database;
 - document-level vectors;
-- mixed document/chunk embedding matrices;
-- multiple embeddings per chunk without a separately versioned future design;
-- a separate or weakened `search_evidence`, `get_clause`, `get_context`, resource, or Evidence Package success path that bypasses the inherited context/conflict/evidence contract;
-- Phase 4 high-accuracy-specific warning/refusal evaluation expansion;
-- Phase 4 supporting-context/table improvements;
-- Phase 4 cross-reference high-accuracy improvements;
-- autonomous engineering interpretation or answer generation.
+- multiple vectors per chunk;
+- LLM query classification;
+- LLM query rewriting as an authoritative retrieval step;
+- generated source facts, relationships, applicability, precedence, citations, or legal/engineering judgments.
 
-If review feedback requires any item in this out-of-scope list, the response should identify the later owning phase and defer it rather than expanding this PR.
+Review feedback requiring those items must be deferred to the owning phase rather than expanding this plan.
 
-## 3. Governing design constraints
+## 4. Governing invariants
 
-Phase 3 must preserve the following design decisions.
+The implementation must preserve all of the following.
 
-1. Accuracy remains the first priority; latency optimization cannot silently lower retrieval quality.
-2. Original source bytes remain authoritative. Embeddings, vector scores, and fusion scores are non-authoritative retrieval metadata.
-3. Every searchable semantic unit remains a Phase 2 chunk/source identity; Phase 3 does not create a parallel evidence entity.
-4. ClauseSift v0.1 generates exactly one embedding for every persisted chunk.
-5. Document-level embeddings are outside the v0.1 artifact and retrieval contract.
-6. The chunk-vector row order is the total order `(document_id, chunks.canonical_order, chunk_id)` using canonical catalog ordering.
-7. SQLite insertion order is never used as vector row identity.
-8. Changing the embedding model or revision invalidates the affected embedding and downstream vector artifacts.
-9. Only the current query is embedded at runtime.
-10. Exact vector search is preferred before ANN for the initial local-corpus scale.
-11. Approximate search is not introduced until measured latency justifies it and recall loss has been quantified.
-12. The public retrieval abstraction must not depend on NumPy, FAISS, or a particular embedding vendor/model.
-13. `original_text` is returned as evidence; `normalized_text`, `search_text`, and `embedding_text` remain derived search representations.
-14. `embedding_text` never replaces source-faithful evidence text.
-15. Explicit document/clause/model/numeric queries remain eligible for exact-mode behavior and must not be forced through embeddings.
-16. Natural-language questions are the primary Phase 3 hybrid target.
-17. `auto` may select only capabilities present in both the installed runtime and active release.
-18. A dense-retrieval failure cannot silently impersonate a successful hybrid result in an explicit hybrid request.
-19. Metadata filters, document identity, edition, jurisdiction, and other Phase 2 authority boundaries remain authoritative over semantic similarity.
-20. Fusion combines candidate rankings; it cannot invent a source, document, clause, relationship, applicability fact, or context edge.
-21. Dense and lexical channels retain independent retrieval provenance so the current Evidence Lineage can explain why a source was selected and Phase 4 can extend that provenance for high-accuracy behavior without replacing it.
-22. All release artifacts are immutable, checksummed, validated before activation, and rolled back together.
-23. Runtime model assets are safe-loaded under the existing release-integrity rules; pickle-backed arbitrary-code model assets remain prohibited.
-24. Lazy model loading, cancellation, deadlines, worker supervision, quarantine, and resource-admission semantics reuse the common runtime contract rather than creating a second implementation.
-25. Query classification is deterministic in Phase 3. A model may not decide whether exact evidence protections should be bypassed.
-26. No retrieval score is interpreted as engineering confidence, legal authority, applicability, or normative force.
-27. Evaluation results, not convenience, determine the selected embedding model, candidate sizes, RRF parameters, and any later performance optimization.
-28. Every successful exact, lexical, or hybrid retrieval path runs the same inherited required-context, material-conflict, citation, lineage, and Evidence Package semantics after seed selection.
+1. Original source bytes remain authoritative.
+2. Embeddings, dense scores, and fusion scores are retrieval metadata only.
+3. Exact and lexical retrieval remain first-class and independently usable.
+4. Canonical document/node/chunk/source identities come from lower-phase artifacts, never vector row numbers or text similarity.
+5. Editions remain distinct even when text is identical.
+6. Metadata filters and exact identity constraints outrank semantic similarity.
+7. One persisted chunk maps to exactly one Phase 3 vector row in v0.1.
+8. Document-level vectors do not appear in the v0.1 chunk matrix.
+9. SQLite insertion order is never vector row identity.
+10. Only the current query is embedded at runtime.
+11. Equivalent complete build inputs produce byte-identical canonical release artifacts where the design claims reproducibility.
+12. Model/provider changes invalidate dependent artifacts and release identity.
+13. Query-preprocessing changes are behavior changes and participate in candidate/release/evaluation identity.
+14. Fusion does not invent or merge canonical evidence identities.
+15. After the corrected Phase 2 prerequisite exists, exact, lexical, and hybrid seeds enter the same required-context/material-conflict/Evidence Package pipeline.
+16. Phase 3 does not add properties to the closed Evidence Package schema without an explicit design/schema version change.
+17. Immutable `lineage.json` remains query-independent.
+18. Request-specific ranks/scores/fusion/context paths are runtime assembly lineage, not release mutation.
+19. All normal work remains bounded, cancelable, deadline-aware, and subject to the common runtime admission/quarantine contract.
+20. Quality gates precede performance optimization.
 
-## 4. Prerequisites and Phase 2 handoff
-
-Phase 3 starts only from the merged Phase 2 baseline on `master` as interpreted by the current design authority.
-
-The implementation must consume, not duplicate, the Phase 2 contracts for:
-
-- approved manifests and document identity;
-- canonical `document_id`, `node_id`, `chunk_id`, and `source_id`;
-- chunk canonical order;
-- `original_text`, `normalized_text`, `search_text`, and `embedding_text` fields or their canonical Phase 2 equivalents;
-- classification provenance;
-- page/source provenance;
-- `knowledge.sqlite` read-only catalog;
-- lexical index and lexical retrieval service;
-- exact lookup service;
-- deterministic source citations;
-- deterministic required Evidence Graph context closure;
-- material-conflict closure and complete material-side preservation;
-- the shared Python/CLI/MCP evidence-service interfaces;
-- strict Evidence Package serialization and typed failure/warning semantics already required by the current lower-phase design;
-- release artifact manifest/checksum machinery;
-- `build_content_id` and `release_id` identity rules;
-- RFC 8785 release lineage;
-- cache dependency declarations;
-- atomic activation/rollback;
-- runtime admission, cancellation, byte-budget, and quarantine behavior;
-- Phase 0 evaluation corpus after the reviewed canonical-ID migration.
-
-Before Phase 3 implementation begins, add a compatibility test that opens a valid Phase 2 release and proves that the Phase 3 builder can enumerate the exact canonical chunk sequence without altering the Phase 2 catalog. Add a runtime compatibility fixture proving that an unchanged exact/lexical request retains the same required-context/material-conflict result before and after Phase 3 dense capability is installed.
-
-## 5. Phase 3 deliverables
-
-The phase should produce the following implementation deliverables.
+## 5. Deliverables
 
 ### 5.1 Build-time deliverables
 
-- embedding-provider interface and selected provider implementation;
-- embedding benchmark harness;
-- embedding benchmark report and selection record;
-- deterministic embedding-text fixture suite;
+- embedding provider abstraction;
+- deterministic embedding-text builder;
+- embedding benchmark harness and report;
+- selected-model decision artifact;
 - chunk embedding builder;
-- canonical row-map generator/validator;
-- `embeddings.f16.npy` release artifact;
-- vector-artifact metadata in the release manifest;
-- Phase 3 lineage entries for embedding/vector artifacts;
-- cache keys for embeddings and vector artifacts;
-- expanded retrieval evaluation reports;
-- Phase 3 release-validation gates.
+- deterministic vector row-map validator;
+- `embeddings.f16.npy`;
+- Phase 3 release-manifest fields;
+- complete local model-asset identity table/digest;
+- Phase 3 cache keys;
+- query-independent Phase 3 `lineage.json` additions;
+- Phase 3 evaluation/campaign ledger;
+- release validation gates.
 
 ### 5.2 Runtime deliverables
 
-- query embedder service;
-- supervised lazy model-loader integration;
-- exact dense-search backend;
-- dense candidate mapper;
+After the Phase 2 corrective prerequisite exists:
+
+- query preprocessing service;
+- lazy query embedder;
+- exact dense index/search backend;
+- dense-hit mapper;
+- metadata-filter application;
 - lexical+dense deduplicator;
-- reciprocal-rank-fusion implementation;
+- RRF fusion service;
 - deterministic query analyser/classifier;
-- Phase 3 retrieval-path resolver integrated with the existing shared retrieval service;
-- retrieval provenance records integrated into the current Evidence Lineage/evidence assembly contract;
-- inherited required-context/material-conflict closure after Phase 3 seed ranking;
-- performance diagnostics for model-free, cold, and warm hybrid queries.
+- retrieval-path resolver;
+- shared-service integration with the corrected Phase 2 evidence pipeline;
+- request-scoped retrieval/assembly provenance using the existing Evidence Package schema;
+- cold/warm/model-free diagnostics.
 
-### 5.3 Decision artifacts
+### 5.3 Decision/audit artifacts
 
-The repository should retain human-readable, versioned records of:
+Retain versioned records of:
 
-- embedding candidates evaluated;
-- exact model identifiers/revisions;
-- exact local model/tokenizer asset identities and hashes, or external-provider request parameters if an external provider is ever admitted;
-- benchmark corpus version;
+- all embedding candidates evaluated;
+- exact model/provider revisions and assets;
+- benchmark corpus/split identities;
 - benchmark configuration;
-- per-stratum results;
-- selected embedding model and rationale;
-- rejected candidates and reason;
-- dense candidate-pool configuration;
-- RRF configuration;
-- query-classifier rule-set/configuration version;
-- measured quality/latency trade-offs;
-- the final Phase 3 gate result.
-
-A benchmark report is evidence for configuration selection; it is not a replacement for immutable release metadata.
+- per-stratum metrics;
+- selected and rejected candidates with rationale;
+- candidate-pool and RRF configurations;
+- query-preprocessing identity;
+- query-classifier identity;
+- Phase 3 held-out campaign preregistration and results;
+- final release-gate decision.
 
 ## 6. Proposed module boundaries
 
-The exact filenames may change, but responsibilities must remain separated.
+The exact filenames may evolve, but responsibilities must stay separated conceptually:
 
 ```text
 src/clausesift/
@@ -231,388 +201,255 @@ src/clausesift/
 └── evaluation/
     ├── embedding.py
     ├── retrieval.py
-    └── query_classification.py
+    ├── query_classification.py
+    └── campaign.py
 ```
 
-The important architecture rules are:
+Builder code owns document-dependent embeddings. Runtime code owns only the current-query embedding. Dense backends return typed candidates, never backend-native objects to public interfaces.
 
-- the builder owns document-dependent embeddings;
-- the runtime owns only current-query embedding;
-- dense search consumes immutable release artifacts;
-- fusion consumes typed candidate lists rather than backend-native objects;
-- query classification consumes normalized request information and deterministic rules;
-- fusion/routing ends at retrieval-seed selection and then enters the existing shared context/conflict/evidence pipeline;
-- evaluation calls public/internal stable interfaces rather than importing backend internals whenever possible.
+## 7. Work package A — Freeze Phase 3 contracts
 
-## 7. Work package A: Freeze the Phase 3 contracts
+Before selecting a model, define strict versioned contracts for:
 
-Before adding a model dependency, write the Phase 3 schemas and interfaces.
+- embedding provider metadata;
+- `embedding_text` projection;
+- vector row ordering;
+- dense candidate records;
+- fusion candidate records;
+- query preprocessing;
+- query analysis/classification;
+- Phase 3 held-out campaign ledger;
+- Phase 3 release/cache/lineage dependencies.
 
-### 7.1 Embedding provider interface
+### 7.1 Embedding provider
 
-Define a narrow provider contract conceptually equivalent to:
-
-```python
-class EmbeddingProvider(Protocol):
-    model_id: str
-    revision: str
-    dimensions: int
-
-    def embed_documents(self, texts: Sequence[str]) -> NDArray: ...
-    def embed_query(self, text: str) -> NDArray: ...
-```
-
-The real interface must additionally expose enough safe metadata for deterministic build identity, including:
+The provider contract must expose enough deterministic metadata to bind build and query behavior:
 
 - provider implementation ID/version;
-- model identifier;
-- exact revision;
-- vector dimension;
-- output dtype before canonical conversion;
+- model ID;
+- exact model revision;
+- dimensions;
+- provider output dtype;
 - normalization behavior;
-- maximum admitted input size;
-- complete tokenizer/model asset identity where applicable;
+- input-size limit;
+- tokenizer/processor identity;
+- complete local asset identity or explicitly approved external request identity;
 - configuration hash.
 
-Do not expose model-native objects outside the provider implementation.
+Model-native objects stay inside the provider implementation.
 
-### 7.2 Dense candidate contract
+### 7.2 Dense candidate
 
-A dense hit must resolve to an existing Phase 2 chunk/source and carry only retrieval metadata, for example the logical fields:
+A dense candidate resolves to existing lower-phase identity and carries only retrieval metadata:
 
-- `source_id`;
-- `chunk_id`;
 - `document_id`;
-- channel = `dense`;
+- `chunk_id`;
+- `source_id`;
 - dense rank;
-- raw similarity score;
-- vector-row index for internal diagnostics only where safe;
-- release/vector-artifact identity;
-- optional normalized query-analysis metadata.
+- dense score;
+- release/vector artifact identity;
+- internal row index only where needed for diagnostics.
 
-The vector row index is not a public evidence identifier.
+The row index is not a public evidence ID.
 
-### 7.3 Fusion candidate contract
+### 7.3 Fusion candidate
 
-Fusion should consume per-channel ranked candidate lists and emit a stable candidate object containing:
+A fused candidate contains:
 
-- source/chunk/document identities;
-- every contributing retrieval channel;
-- per-channel rank;
-- per-channel score where meaningful;
-- deterministic fused score;
-- deterministic fused rank;
-- the RRF configuration identity;
-- the resolved Phase 3 retrieval path;
-- no generated summary or source mutation.
+- canonical document/chunk/source identity;
+- participating channels;
+- channel ranks/scores;
+- deterministic fused score/rank;
+- RRF configuration identity;
+- resolved retrieval path;
+- no generated evidence text.
 
-### 7.4 Query-analysis contract
+## 8. Work package B — Deterministic embedding text
 
-The deterministic analyser must return a typed object rather than a loose dictionary.
-
-It must represent the design-defined features:
-
-- document codes;
-- clause numbers;
-- editions;
-- product model numbers;
-- numbers and units;
-- document types;
-- jurisdiction filters;
-- discipline filters;
-- version-comparison intent;
-- source-page request intent;
-- whether the residual query is natural-language dominant.
-
-Each detected feature must retain enough source-span or normalized-value information to make classification testable.
-
-## 8. Work package B: Embedding-text determinism
-
-Phase 3 must not embed arbitrary presentation strings assembled differently by different code paths.
-
-### 8.1 Canonical `embedding_text`
-
-For each Phase 2 chunk, define one deterministic `embedding_text` projection.
-
-It should use only approved deterministic inputs already present in the canonical chunk/document model, such as:
+Define one canonical `embedding_text` for each lower-phase chunk using only deterministic, approved inputs such as:
 
 - normalized chunk text;
-- document code when useful;
-- clause/hierarchy context when useful;
+- document code where useful;
+- clause/hierarchy context;
 - deterministic headings;
-- deterministic table headers/units already preserved by the chunker;
-- deterministic document metadata intentionally admitted by the design.
+- deterministic table headers/units;
+- explicitly admitted safe document metadata.
 
-It must not include:
+It must exclude:
 
-- mutable filesystem paths;
-- release timestamps;
+- filesystem paths;
+- timestamps;
 - random IDs;
-- query-dependent text;
-- generated summaries unless the design later explicitly admits a generated retrieval field;
+- query-dependent content;
 - reviewer comments;
-- model-generated legal interpretations;
-- data from another edition merely because it is similar.
+- generated interpretations;
+- text from another edition merely because it is similar.
 
-### 8.2 Projection identity
+Freeze:
 
-Define a versioned `embedding_text_schema_version` and configuration hash.
+- `embedding_text_schema_version`;
+- transformation/configuration hash;
+- Unicode normalization behavior;
+- deterministic field ordering.
 
-The embedding cache key must include the ordered tuple specified by the design:
+Cache identity uses the design-defined ordered chunk tuple `(document_id, canonical_order, chunk_id, embedding_text_hash)` plus the complete Section 25 dependency set.
 
-```text
-(document_id, canonical_order, chunk_id, embedding_text_hash)
-```
+Tests must prove stable bytes, correct invalidation, edition separation, and no unrelated-document over-invalidation beyond the declared dependency graph.
 
-plus the complete authoritative dependency set from `docs/design.md` Section 25, including at minimum:
+## 9. Work package C — Embedding benchmark
 
-- `embedding_scope: "chunk"`;
-- row-order version;
-- model identifier/revision;
-- complete model/provider asset or external-request identity;
-- provider/configuration identity;
-- dependency-lock hash;
-- build-toolchain fingerprint where required.
-
-### 8.3 Determinism tests
-
-Tests must prove:
-
-- identical chunk inputs produce byte-identical `embedding_text`;
-- hierarchy metadata order is deterministic;
-- Unicode normalization is deterministic;
-- table headers/units do not change order across rebuilds;
-- a changed chunk text changes `embedding_text_hash`;
-- an unrelated document change does not invalidate another chunk's embedding cache entry;
-- a changed model/configuration invalidates embeddings even when `embedding_text` is unchanged;
-- two editions with identical wording remain distinct chunk identities and row positions.
-
-## 9. Work package C: Embedding-model benchmark
-
-No embedding model is selected by reputation alone.
+No model is selected by popularity or generic benchmark reputation.
 
 ### 9.1 Candidate shortlist
 
-Create a small replaceable candidate set that can realistically run in the supported local environment and packaging model.
-
-The shortlist should include models that plausibly cover:
+Benchmark a small replaceable set that can realistically support:
 
 - English technical text;
 - Chinese technical text;
-- cross-language English↔Chinese retrieval;
-- engineering terminology;
-- short clause-like text;
+- English↔Chinese retrieval;
+- HVAC terminology;
+- fire-safety terminology;
+- short clauses;
 - longer contextual chunks.
 
-The benchmark harness, not this plan, decides the winner.
+### 9.2 Required strata
 
-### 9.2 Required benchmark strata
-
-The benchmark must include the design-defined categories:
+Include at minimum:
 
 - English standards;
 - Chinese standards;
 - cross-language queries;
 - HVAC terminology;
 - fire-safety terminology;
-- identifiers and product model numbers;
-- numbers and units;
+- identifiers/product models;
+- numbers/units;
 - synonyms;
 - negation;
-- exception queries.
-
-Add explicit strata for:
-
-- near-duplicate clauses in different editions;
+- exception queries;
+- near-duplicate clauses across editions;
 - similar wording with different normative modality;
-- same numeric value with different units;
-- different numeric values with similar surrounding wording;
-- clause-number-only queries that should remain exact-mode dominant;
-- manufacturer versus standard terminology;
-- hard negatives with strong semantic similarity but wrong document/edition;
-- queries where lexical retrieval is already perfect;
-- queries where dense retrieval is expected to add recall.
+- unit-equivalent values;
+- different values with similar wording;
+- wrong-edition semantic hard negatives;
+- lexical-perfect cases;
+- dense-complementarity cases.
 
-### 9.3 Benchmark protocol
+### 9.3 Protocol
 
-For each candidate model:
+For each candidate:
 
-1. freeze model ID/revision, complete model asset identity, and provider configuration;
-2. build embeddings from the same immutable benchmark chunk set;
+1. freeze model/provider/asset/configuration identity;
+2. embed the same immutable benchmark chunk set;
 3. verify deterministic row mapping;
-4. verify byte-identical canonical embedding output for repeated equivalent builds under the admitted build environment;
-5. run exact dense search only;
-6. measure Recall@K over several K values including 5 and 20;
-7. record MRR/NDCG or another ranking diagnostic only as secondary evidence, not a replacement for the design's release gates;
-8. report performance by stratum, not only globally;
-9. measure build throughput;
-10. measure artifact size;
-11. measure cold model-load time;
-12. measure warm query-embedding latency;
-13. measure exact dense-search latency separately from embedding latency;
-14. measure peak resident memory;
-15. measure packaging/model-asset complexity;
-16. retain all candidate results, including failed/rejected models.
+4. verify canonical release-byte reproducibility under the admitted build environment;
+5. run exact dense search;
+6. measure Recall@5 and Recall@20 plus secondary ranking diagnostics;
+7. report every required stratum;
+8. measure build throughput and artifact size;
+9. measure cold load, warm query embedding, and dense search separately;
+10. measure peak RSS;
+11. retain rejected candidate results.
 
-### 9.4 Selection criteria
+Selection priority is retrieval correctness, hard-negative/cross-language robustness, reproducibility/safe loading, runtime feasibility, then speed/packaging simplicity.
 
-The selected model must be the best evidence-backed trade-off under the project's priority order:
+## 10. Work package D — Offline embedding artifact
 
-1. retrieval correctness;
-2. cross-language and hard-negative robustness;
-3. byte-reproducibility and safe loading;
-4. runtime feasibility;
-5. build/runtime speed;
-6. packaging simplicity.
+### 10.1 Row order
 
-A faster model does not win if it lowers the applicable retrieval confidence bound.
-
-## 10. Work package D: Offline embedding builder
-
-### 10.1 Row enumeration
-
-Read the complete Phase 2 chunk set in the exact total order:
+Rows are exactly ordered by:
 
 ```text
 (document_id, chunks.canonical_order, chunk_id)
 ```
 
-Require:
+Require one-to-one mapping with all persisted chunks, no duplicates, no missing rows, no sentinel rows, no document rows, and no reliance on SQLite physical order.
 
-- dense per-document `canonical_order` as already validated by Phase 2;
-- one source per chunk as already required by the catalog;
-- no duplicate chunk ID;
-- no missing chunk;
-- no foreign/cross-document row;
-- no dependence on SQLite physical row order.
+### 10.2 Fixed v0.1 format
 
-### 10.2 Exactly one vector per chunk
+The release artifact is exactly:
 
-For v0.1:
+```text
+embeddings.f16.npy
+```
 
-- row count must equal chunk count exactly;
-- every chunk has one and only one vector row;
-- no document vectors are inserted;
-- no sentinel row is inserted;
-- no padding row is inserted;
-- no duplicate embedding row is admitted;
-- a zero-length corpus may be rejected by the surrounding release rules rather than represented with ambiguous vector semantics.
+with:
 
-### 10.3 Canonical dtype and normalization
-
-The v0.1 release artifact follows the design's fixed safe numeric matrix contract:
-
-- filename/artifact kind `embeddings.f16.npy`;
-- one numeric rank-two `.npy` matrix;
-- chunk-only scope;
-- actual and manifest-declared dtype exactly `float16`;
-- no object dtype;
-- no structured dtype;
+- rank two;
+- actual and declared dtype `float16`;
+- finite numeric values;
+- no object/structured dtype;
 - no pickle;
-- no `.npz` fallback;
-- normalized vectors when cosine-equivalent dot-product search is selected;
-- finite values only;
-- no NaN/Inf;
-- declared dimensions exactly equal every row's width.
+- declared dimensions matching every row;
+- normalized vectors when required by the selected metric.
 
-If provider output is higher precision, canonical conversion happens once under a versioned rule before sealing the release artifact and is covered by evaluation. A different release dtype requires an explicit future design/release-schema change; it is not a Phase 3 implementation choice.
+Provider output may be higher precision internally, but canonical conversion to `float16` is a versioned build transform before sealing the release.
 
-### 10.4 Artifact metadata
+### 10.3 Manifest metadata
 
-The release manifest records at minimum:
+Bind at minimum:
 
-- artifact path;
-- SHA-256;
-- byte size;
-- `embedding_scope: "chunk"`;
-- `row_count`;
-- `vector_dimensions`;
-- `dtype: "float16"`;
-- `normalized`;
-- row-order schema/version;
-- embedding model ID;
-- embedding model revision;
-- complete model format/loader/tokenizer/weight asset identity required by the release contract;
-- provider/configuration hash;
-- embedding-text schema/version;
-- embedding artifact schema/version.
+- artifact relative path;
+- byte size and SHA-256;
+- scope `chunk`;
+- row count;
+- dimensions;
+- dtype;
+- normalization;
+- row-order version;
+- model/provider identity;
+- complete model-asset identity;
+- embedding configuration;
+- embedding-text version;
+- artifact schema version.
 
-### 10.5 Atomic builder behavior
+## 11. Work package E — Safe artifact validation
 
-Write the matrix to a candidate-release temporary location, validate it completely, then seal it into the candidate release. A failed or interrupted build must not modify the currently active release.
+Independent validation must reopen the artifact rather than trusting builder memory.
 
-## 11. Work package E: Embedding artifact validation
+Use bounded semantics equivalent to:
 
-The independent release gate must validate the artifact without trusting builder in-memory state.
+```python
+numpy.load(
+    path,
+    mmap_mode="r",
+    allow_pickle=False,
+    max_header_size=10000,
+)
+```
 
-Required checks include:
+Validate:
 
-- checksum and byte size;
-- safe loading equivalent to `numpy.load(path, mmap_mode="r", allow_pickle=False, max_header_size=10000)`;
-- no fallback retry with a larger or unbounded NumPy header;
-- rank exactly two;
-- dtype exactly `float16`;
+- checksum/size;
+- bounded header;
+- rank/dtype;
 - finite values;
-- normalization invariant within declared numerical tolerance;
-- dimensions match manifest;
-- row count equals catalog chunk count;
-- reconstructed row map is total and one-to-one;
-- row ordering exactly matches `(document_id, canonical_order, chunk_id)`;
-- embedding scope is exactly `chunk`;
-- row-order version supported;
-- model/configuration and complete model-asset identity supported;
-- expected file size consistent with shape/dtype/header contract;
-- matrix is read-only at runtime;
-- no unexpected sidecar file is required by the loader;
-- lineage identifies the embedding transformation and artifact hash.
+- normalization invariant;
+- manifest dimensions/row count;
+- complete row-map reconstruction;
+- read-only behavior;
+- supported schema/model/provider identity;
+- complete model asset binding;
+- query-independent lineage artifact identity.
 
-Corruption, row mismatch, non-`float16` dtype, oversized/malformed header, unknown schema, or incomplete model-asset binding blocks activation.
+Any mismatch blocks activation.
 
-## 12. Work package F: Memory-mapped exact dense search
+## 12. Work package F — Exact dense retrieval
 
-### 12.1 Default backend
+The initial backend uses read-only NumPy memory mapping and exact scoring. ANN is not introduced until measured scale proves it necessary and recall loss is explicitly evaluated.
 
-Implement the initial exact backend using a NumPy memory map for small and medium corpora.
-
-The runtime opens the independently validated matrix read-only under the same bounded safe-loading contract and performs exact score computation conceptually equivalent to:
-
-```python
-scores = embeddings @ query_vector
-```
-
-when vectors are normalized and dot product is the admitted metric.
-
-### 12.2 Backend abstraction
-
-The dense-search service must not expose NumPy arrays through its public service contract.
-
-Use a backend interface such as:
-
-```python
-class DenseIndex(Protocol):
-    def search(self, query_vector, *, limit, filters) -> list[DenseHit]: ...
-```
-
-A future FAISS exact implementation can satisfy the same contract.
-
-ANN remains out of scope unless a separately measured future change proves exact search cannot meet target latency and its recall loss is explicitly evaluated.
-
-### 12.3 Query-vector validation
+### 12.1 Query vector validation
 
 Before scoring:
 
-- query vector dimensions must equal release dimensions;
-- values must be finite;
-- vector must satisfy the selected normalization contract;
-- model identity and complete asset/configuration identity used for the query must match the release embedding identity;
-- a query vector from another release/model cannot be reused accidentally;
-- zero-norm vectors fail visibly rather than producing arbitrary ranking.
+- dimensions match release dimensions;
+- values are finite;
+- normalization contract holds;
+- query model/provider/assets/configuration exactly match release identity;
+- zero-norm vectors fail visibly.
 
-### 12.4 Exact top-K selection
+### 12.2 Deterministic top-K
 
-Dense top-K selection must be deterministic.
-
-Tie-breaking should use a total order independent of NumPy implementation details, ultimately reducing to canonical release identity such as:
+Use a versioned total order independent of backend/hash iteration, conceptually:
 
 ```text
 (score descending,
@@ -622,798 +459,448 @@ Tie-breaking should use a total order independent of NumPy implementation detail
  source_id)
 ```
 
-The precise tie rule must be frozen and versioned.
+### 12.3 Metadata filtering
 
-### 12.5 Metadata filtering
+Semantic similarity never substitutes document/edition/jurisdiction/status/type identity. Filter semantics must match the lower-phase service exactly regardless of whether filtering happens before or after score calculation.
 
-Dense similarity never overrides metadata authority.
+A vector row that cannot map one-to-one to catalog identity is a release-integrity failure, not a skippable hit.
 
-Candidate filtering must preserve:
+## 13. Work package G — Query preprocessing and embedding
 
-- exact selected release;
-- document/edition filters;
-- lifecycle/status filters;
-- jurisdiction/discipline filters;
-- document-type filters;
-- any other Phase 2 filter semantics already defined.
+Only the current query is embedded at runtime.
 
-Filtering may be implemented before scoring where efficient or after score computation where simpler, but result semantics must be identical and tested.
+Query preprocessing is deterministic and release-bound. It must not silently:
 
-No filter may substitute a newer edition, guessed jurisdiction, or semantically similar document.
-
-## 13. Work package G: Runtime query embedding
-
-Only the current request query is embedded at runtime.
-
-### 13.1 Model loading
-
-Reuse the common runtime lazy-model loader and supervised worker contract from the design and merged Phase 2 runtime plan.
-
-Do not create an embedding-specific timeout subsystem.
-
-The query embedding model must:
-
-- load from checksum-verified allowlisted assets;
-- use the exact model ID/revision/configuration and complete bound asset set named by the active release;
-- use safe model formats/loaders admitted by the release contract;
-- recheck every file the loader may open against the manifest byte size/SHA-256 table before deserialization;
-- expose a handle only after the supervised load transitions successfully to ready;
-- participate in single-flight loading;
-- obey per-attempt model-load deadline;
-- obey per-caller overall deadline;
-- be cancelled/reaped under existing terminal-state rules;
-- trigger release quarantine if a lazy asset integrity check fails.
-
-### 13.2 Query preprocessing
-
-Define one deterministic query-embedding preprocessing path.
-
-It may trim/normalize request whitespace according to the already approved input contract, but it must not:
-
-- silently remove a negation;
+- remove negation;
 - drop numbers/units;
-- replace document codes with generated synonyms;
-- rewrite the query with an LLM;
-- add hidden answer text;
-- use a different preprocessing path for evaluation and production.
+- replace identifiers with generated synonyms;
+- rewrite with an LLM;
+- add hidden answer content;
+- use a different path in evaluation and production.
 
-### 13.3 Query embedding cache
+The detailed identity/invalidation contract is defined in `phase-3-query-preprocessing-identity.md`.
 
-A small in-process cache may be evaluated only if needed. If used, its key must bind:
+The lazy model loader reuses the common supervised worker, deadline, cancellation, single-flight, safe-asset, and quarantine contracts. Phase 3 does not create a second timeout or terminal-state implementation.
 
-- exact normalized query bytes;
-- model ID/revision and complete model-asset/configuration identity;
-- embedding preprocessing schema/configuration;
-- active release/model compatibility identity where needed.
+## 14. Work package H — Reciprocal-rank fusion
 
-Cache contents are performance data, not release authority, and may be discarded at any time.
+Hybrid mode combines lexical and dense ranked candidate lists.
 
-## 14. Work package H: Dense candidate generation
+### 14.1 Deduplication
 
-For a hybrid query:
+Deduplicate by canonical source/chunk identity, never normalized-text equality. Identical wording in different editions remains distinct.
 
-1. validate request and filters;
-2. obtain/validate current-query embedding;
-3. perform exact dense search against the active release matrix;
-4. map row indices through the deterministic row map;
-5. map chunks to their unique Phase 2 source rows;
-6. apply canonical metadata filters;
-7. create typed `dense` candidates;
-8. sort deterministically;
-9. retain the configured dense candidate pool for fusion.
+### 14.2 RRF
 
-A row that cannot map one-to-one to the catalog is a release-integrity failure, not a skippable hit.
-
-Dense candidate objects must not copy/modify source text merely to support fusion.
-
-## 15. Work package I: Reciprocal-rank fusion
-
-### 15.1 Phase 3 fusion scope
-
-Phase 3 hybrid mode fuses:
-
-- lexical retrieval;
-- dense retrieval.
-
-Do not pull Phase 4 cross-encoder reranking into this stage.
-
-Exact identifier lookup remains available through exact-mode routing. Phase 4 may consume the stable ranked candidate layer for high-accuracy reranking without replacing Phase 3's identity/fusion contracts.
-
-### 15.2 Deduplication identity
-
-Deduplicate candidates by the canonical evidence identity defined by the Phase 2 service layer—normally the unique source/chunk mapping—not by normalized text equality.
-
-Two different editions with identical text remain two different candidates.
-
-Two chunks with similar text remain distinct unless the Phase 2 identity contract says they are the same source.
-
-### 15.3 RRF formula
-
-Use a versioned RRF configuration rather than hard-coding an undocumented magic number.
-
-The logical contribution of channel `c` for candidate `x` is:
+The logical unweighted contribution is:
 
 ```text
-1 / (rrf_k + rank_c(x))
+1 / (rrf_k + rank)
 ```
 
-where ranks are one-based and `rrf_k` is selected through benchmark/evaluation evidence.
+with one-based ranks and a versioned, benchmark-selected `rrf_k`.
 
-The fused score is the deterministic sum of contributions from channels in which the candidate appears.
+Benchmark bounded candidates for:
 
-### 15.4 Configuration search
-
-Benchmark a bounded set of candidate values for:
-
-- lexical candidate pool size;
-- dense candidate pool size;
+- lexical pool size;
+- dense pool size;
+- final fused pool size;
 - `rrf_k`;
-- final fused candidate pool size;
-- any channel weighting only if the design permits it and evidence shows plain RRF is insufficient.
+- channel weighting only if explicitly admitted and evidence shows plain RRF is insufficient.
 
-Any high-accuracy candidate-count guidance in the design is a hypothesis for later high-accuracy work, not a fixed Phase 3 constant. Select Phase 3 values using Recall@K and hard-negative evidence.
+### 14.3 Deterministic ordering
 
-### 15.5 Deterministic ordering
+Freeze a complete tie chain using fused score, contributing rank(s), canonical document/chunk/source identity, and no hash-map/backend-native order.
 
-The final fused ordering must have a complete tie-break chain, for example:
+## 15. Work package I — Query analysis and path classification
 
-```text
-(fused score descending,
- best contributing rank ascending,
- channel-presence rank,
- document_id,
- chunk canonical_order,
- chunk_id,
- source_id)
-```
-
-The exact tuple must be frozen by tests and versioned.
-
-Floating-point ties must not depend on hash-map iteration or backend return order.
-
-### 15.6 Fusion provenance
-
-For every fused candidate retain:
-
-- lexical rank/score when present;
-- dense rank/score when present;
-- RRF contribution by channel;
-- fused score;
-- fused rank;
-- RRF configuration identity;
-- lexical-index artifact hash;
-- embedding/vector artifact hash;
-- query-classifier/resolved-path identity.
-
-This is retrieval provenance. It does not alter source provenance, required context, material conflicts, or evidence meaning.
-
-## 16. Work package J: Deterministic query analysis
-
-Phase 3 implements the design's deterministic query analysis before mode/path selection.
-
-### 16.1 Feature families
-
-Detect with versioned deterministic rules:
+Use deterministic rules to detect:
 
 - document codes;
 - clause numbers;
 - editions;
 - product model numbers;
-- numbers and units;
+- numbers/units;
 - document types;
-- jurisdiction terms;
-- discipline terms;
+- jurisdiction/discipline terms;
 - version-comparison intent;
-- source-page request intent.
+- source-page intent;
+- residual natural-language dominance.
 
-Also compute conservative structural indicators such as:
+Internal outcomes include at least:
 
-- query token/scalar length;
-- proportion of tokens consumed by recognized identifiers;
-- whether meaningful natural-language residual text remains;
-- whether the query contains interrogative/question structure;
-- whether several documents/concepts appear to be requested;
-- whether an exact target is fully specified.
+- `exact-dominant`;
+- `hybrid-natural-language`;
+- `ambiguous`;
+- `later-phase-high-accuracy-intent`.
 
-### 16.2 Rule authority
+Rules choose channels only. They cannot determine legal authority, applicability, normative force, conflict resolution, or whether required context may be dropped.
 
-Rules are routing heuristics only.
+Exact-dominant requests preserve exact protections. Explicit hybrid requests fail visibly when dense capability is unavailable; they are not silently relabelled lexical-only results.
 
-They may decide which retrieval channels to invoke, but they cannot decide:
+## 16. Work package J — Phase 3 held-out campaign
 
-- which edition is legally controlling;
-- whether a source is applicable;
-- whether a clause is normative;
-- whether a conflict is resolved;
-- whether required context may be omitted;
-- whether a dense match is factually correct.
+Phase 3 has its own evaluation-governance contract; the Phase 2 retry policy is not implicitly extended.
 
-### 16.3 Feature provenance
+### 16.1 Data separation
 
-For each recognized feature retain:
+Keep distinct:
 
-- feature type;
-- normalized value;
-- source character/byte span where practical;
-- rule ID/version;
-- confidence as deterministic state (`matched`/`ambiguous`/`not_matched`) rather than an opaque model probability;
-- any ambiguity reason.
+- development data;
+- model-selection data;
+- optional non-decisional screening reserves;
+- one final confirmation split;
+- reproduction-only replays.
 
-## 17. Work package K: Query classification and Phase 3 path resolution
+### 16.2 Preregistration
 
-### 17.1 Required classifier outcomes
+Before final confirmation, persist:
 
-The Phase 3 classifier should distinguish at least:
+- campaign ID;
+- complete frozen candidate identity hash;
+- gate families/strata;
+- sample-size rules;
+- final split identity/hash;
+- any screening reserve identities/order;
+- review/corpus policy versions.
 
-- **exact-dominant** — explicit document/clause/model/numeric target where exact+lexical retrieval should remain primary;
-- **hybrid-natural-language** — natural-language question where lexical+dense fusion is appropriate;
-- **ambiguous** — query contains both exact anchors and substantive natural-language intent and requires a conservative documented rule;
-- **later-phase-high-accuracy-intent** — query characteristics suggest Phase 4 reranking, additional supporting context, or high-accuracy table/cross-reference handling may be useful, but Phase 3 must not implement those Phase 4 additions.
+### 16.3 Decisive-use rules
 
-The public design mode enum remains `auto`, `exact`, `hybrid`, `high_accuracy`; this internal classification vocabulary need not become a public enum.
+- the final confirmation split has one decisive use while unseen;
+- after observation it is retired for materially changed candidates;
+- exact same candidate may replay it only as `reproduction_only`;
+- reproduction does not create new independent evidence or reset failure;
+- a changed candidate requires fresh decisive data;
+- at most two preregistered screening reserves are allowed and they are non-decisional;
+- no reserve cherry-picking;
+- final-confirmation failure closes the campaign;
+- a later campaign requires documented remediation, a new candidate/campaign ID, and genuinely fresh independently reviewed confirmation data.
 
-### 17.2 Conservative routing
+### 16.4 Ledger
 
-Recommended Phase 3 behavior:
+Record campaign/candidate/split identity, role, observed/retired state, first decisive observation, metric results, outcome, and successor/predecessor links. Release validation rejects contradictory or reused decisive evidence.
 
-- exact-dominant → use existing exact-mode retrieval path;
-- hybrid-natural-language → use lexical+dense fusion;
-- ambiguous → prefer the path proven by evaluation, with exact anchors preserved as constraints/features rather than discarded;
-- later-phase-high-accuracy-intent → preserve the intent signal, but do not implement Phase 4 reranking, extra supporting-context expansion, or other high-accuracy-only behavior.
+Tests cover all failure/replay/rotation boundaries, including query-preprocessing-only candidate changes.
 
-Phase 3 integrates the resolved retrieval path into the existing shared retrieval service. Once retrieval seeds are selected, the inherited Phase 2 required-context and material-conflict closure executes, followed by the existing strict Evidence Package serialization and shared Python/CLI/MCP projection. Hybrid routing must not create a diagnostic-only or weakened evidence path merely because the seed channel is semantic.
+## 17. Work package K — Regression evaluation
 
-### 17.3 Explicit override preparation
+### 17.1 Primary retrieval gates
 
-The service layer should accept a typed requested mode/path consistent with the current shared retrieval contract so Phase 4 can extend `high_accuracy` without replacing Phase 3 internals.
+For independently labelled applicable cases:
 
-An explicit Phase 3 hybrid request must fail visibly if the active release or installed runtime lacks dense capability; it must not silently return lexical-only results labelled hybrid.
+- Recall@20 one-sided 95% Wilson lower bound >= 98%;
+- Top-5 one-sided 95% Wilson lower bound >= 95%.
 
-## 18. Work package L: Regression-evaluation expansion
+Use at least 150 applicable cases for each 98% gate and at least 60 for each 95% gate, expanding samples as needed for critical strata.
 
-Phase 3 expands the evaluation corpus and evaluator implementation around semantic retrieval.
+Always report numerator, denominator, point estimate, lower bound, corpus/split identity, and complete candidate identity.
 
-### 18.1 Retrieval slices
+### 17.2 Comparative gates
 
-Evaluate at least:
+Compare:
 
-- lexical alone;
-- dense alone;
-- hybrid fusion;
-- existing exact mode;
-- classifier-selected Phase 3 path;
-- explicit hybrid path;
-- hard-negative subsets;
-- multilingual subsets;
-- cross-language subsets;
-- identifier/numeric subsets;
-- negation/exception subsets;
-- same-wording/different-edition subsets.
+- lexical vs dense;
+- lexical vs hybrid;
+- best lower-phase path vs classifier-selected Phase 3 path.
 
-### 18.2 Required primary gates
+Do not permit global-average improvement to hide critical regressions in exact document codes, exact clauses, product models, numbers/units, wrong-edition hard negatives, negation, or exceptions.
 
-Use the design's retrieval quality gates on independently labelled applicable cases:
+### 17.3 Query-classifier evaluation
 
-- expected evidence present in Recall@20: one-sided 95% Wilson lower bound >= 98%;
-- expected evidence present in Top-5: one-sided 95% Wilson lower bound >= 95%.
+Create independent expected routing labels and report a confusion matrix. Require zero known cases where deterministic exact anchors are discarded and produce wrong-document/wrong-edition routing.
 
-For each 98% probabilistic gate require at least 150 applicable cases; for each 95% gate require at least 60 applicable cases, with larger stratified samples when critical query families or hard negatives would otherwise be underrepresented.
+### 17.4 Downstream evidence semantics
 
-Always report:
+After the corrected Phase 2 prerequisite exists, verify hybrid seed selection does not change/drop:
 
-- numerator;
-- denominator;
-- point estimate;
-- one-sided Wilson lower bound;
-- corpus/split identity;
-- model/configuration identity.
+- required parent scope;
+- applicability;
+- required definitions/dependencies/exceptions;
+- required table context;
+- material conflict sides;
+- typed context-limit behavior;
+- deterministic citations;
+- source/document/edition identity;
+- Python/CLI/MCP evidence semantics.
 
-### 18.3 Comparative gates
+## 18. Work package L — Cache and release identity
 
-In addition to absolute gates, Phase 3 should reject a hybrid configuration that materially regresses a critical Phase 2 exact/lexical stratum merely because the global average improves.
+`docs/design.md` Section 25 is the sole authoritative cache-dependency contract.
 
-At minimum compare:
+Embedding invalidation includes the complete ordered chunk/text identity, embedding scope/row order, exact model/provider/assets, embedding configuration, dependency lock, and toolchain fingerprint where declared.
 
-- lexical versus dense;
-- lexical versus hybrid;
-- best Phase 2 path versus classifier-selected Phase 3 path.
+Vector invalidation includes embedding artifact hash, backend/version, metric/configuration, dependency lock, and toolchain identity where declared.
 
-Critical regression slices include:
+Phase 3 release/build identity additionally binds behavior-bearing:
 
-- exact document code;
-- exact clause number;
-- product model;
-- numeric/unit query;
-- wrong-edition hard negative;
-- negation/exception query.
-
-### 18.4 Query-classifier evaluation
-
-Create independently reviewed expected routing labels for a representative query subset.
-
-Report a confusion matrix for:
-
-- exact-dominant;
-- hybrid-natural-language;
-- ambiguous;
-- later-phase-high-accuracy-intent.
-
-More important than aggregate accuracy, require zero known cases where deterministic exact anchors are discarded and cause a wrong-edition/wrong-document retrieval path.
-
-### 18.5 Downstream evidence-semantics regression
-
-Hybrid retrieval evaluation must also prove that changing the seed channel does not weaken the inherited evidence contract. Required regression slices verify:
-
-- required parent scope is retained;
-- applicability is retained;
-- dependencies/definitions/exceptions are retained when required;
-- required table context is retained;
-- every material conflict side survives adverse lexical/dense/fusion ranks;
-- context-limit behavior remains a typed failure/incomplete-required outcome rather than a truncated hybrid success;
-- deterministic citations/source/edition identity are unchanged;
-- Python/CLI/MCP expose the same evidence semantics for the same resolved request.
-
-### 18.6 Leakage control
-
-Embedding model, RRF parameter, candidate-pool, and classifier-rule selection use development/model-selection data only.
-
-The final release gate uses the existing preregistered held-out/confirmation discipline inherited from earlier phases. Do not repeatedly tune against an observed release gate.
-
-## 19. Work package M: Embedding benchmark and held-out data separation
-
-The model-selection workflow must explicitly separate:
-
-1. development cases used while implementing the harness;
-2. model-selection/benchmark cases used to compare candidate models and RRF parameters;
-3. held-out release-gate cases used only after the candidate configuration is frozen.
-
-The frozen candidate identity includes:
-
-- embedding model ID/revision and complete model-asset identity;
-- provider/configuration hash;
-- embedding-text version/configuration;
-- release vector dtype/normalization rule;
-- dense candidate pool size;
-- lexical candidate pool size;
 - RRF configuration;
-- query-analysis rule-set/configuration;
-- classifier rule-set/configuration;
-- exact dense backend/version;
-- relevant dependency-lock/toolchain identity.
+- query-preprocessing identity;
+- query-analysis/classifier identity;
+- candidate-pool configuration;
+- Phase 3 gate-result identities.
 
-Changing any behavior-bearing item creates a new candidate and invalidates prior final-gate evidence according to the existing retry/confirmation policy.
+Cache hits are allowed only when the complete declared dependency set is unchanged.
 
-## 20. Work package N: Release/cache integration
+## 19. Work package M — Evidence Lineage
 
-### 20.1 Embedding cache key
+### 19.1 Immutable `lineage.json`
 
-Use the authoritative dependency contract in `docs/design.md` Section 25 — **Build cache and invalidation**.
+The sealed release lineage contains only query-independent source/build/release provenance and artifact/configuration references.
 
-The Phase 3 implementation inherits the complete Section 25 chunk-embedding dependency entry, including the ordered chunk identity/text hashes, embedding scope, row-order version, exact model/provider asset or external request identity, embedding configuration, dependency lock, and build-toolchain fingerprint. The abbreviated list here is not a substitute for that authoritative table.
-
-### 20.2 Vector artifact cache key
-
-Use the complete Section 25 vector-index dependency entry.
-
-The vector artifact depends on at least:
-
-- embedding artifact hash;
-- backend/engine ID and version;
-- distance metric;
-- vector-search configuration;
-- dependency lock;
-- toolchain fingerprint where required.
-
-For the NumPy exact backend, the vector artifact may simply be the validated embedding matrix plus declared backend metadata rather than a second redundant index file. Do not manufacture an index artifact with no function solely for symmetry.
-
-### 20.3 Invalidation tests
-
-Require cache misses after every behavior-bearing dependency identified by Section 25 changes, including:
-
-- changed source/chunk text;
-- changed chunk membership affecting `embedding_text`;
-- changed embedding model/revision or any bound model asset;
-- changed embedding configuration;
-- changed embedding-text projection version;
-- changed dtype/normalization rule;
-- changed row-order version;
-- changed vector backend/metric/configuration;
-- changed dependency lock/toolchain identity where declared;
-- changed behavior-bearing query/fusion configuration when it is part of release identity.
-
-Require cache hits only when the complete declared dependency set is unchanged.
-
-## 21. Work package O: Evidence Lineage extension
-
-Phase 2 already materializes immutable source/build lineage and the runtime already has the evidence-assembly lineage contract. Phase 3 extends that provenance with the new retrieval artifacts and channels.
-
-The Phase 3 lineage update must include:
+Phase 3 adds as applicable:
 
 - embedding-text transformation identity;
-- embedding provider/model/revision/configuration and complete bound asset identity;
+- embedding provider/model/revision/configuration and bound assets;
 - embedding artifact hash;
-- vector backend/metric/configuration identity;
-- vector artifact hash or exact-backend declaration;
-- lexical index hash already present from Phase 2;
-- RRF rule/configuration identity where it is admitted as a release behavior input;
-- query-analysis/classifier rule-set/configuration identity where required by build/release identity;
-- lexical/dense/fusion channel rank/score/contribution metadata for selected retrieval seeds as required by the existing runtime lineage contract.
+- vector backend/metric/configuration;
+- vector artifact hash/exact-backend declaration;
+- lexical-index artifact identity;
+- RRF configuration identity when release-bound;
+- query-preprocessing identity when release-bound;
+- query-analysis/classifier configuration identity when release-bound.
 
-Every new build transformation retains the complete transformation tuple required by the merged Phase 2 lineage contract:
+It must not contain query text, request IDs, candidate ranks/scores, fusion results, selected seed sets, or query-specific context paths.
 
-```text
-kind,
-role,
-producer,
-producer_version,
-configuration_sha256,
-content_sha256
-```
+### 19.2 Runtime Evidence Package provenance uses the existing closed schema
 
-Phase 3 does not add Phase 4 reranker or extra supporting-context-specific provenance, but it must preserve all inherited required-context/material-conflict assembly lineage.
+Phase 3 does not add new Evidence Package properties.
 
-## 22. Work package P: Release manifest and build identity
+For each retrieval channel, use only the existing `assembly.retrievals[]` fields defined by `docs/design.md`:
 
-A Phase 3 candidate release must bind all Phase 3 behavior-bearing artifacts and configuration.
+- `channel`;
+- `channel_version`;
+- `configuration_sha256`;
+- `artifact_set_sha256`;
+- `candidate_rank`;
+- `score`.
 
-Add or validate manifest fields for:
+When RRF runs, use only the existing `assembly.fusion` fields:
 
-- embedding artifact metadata;
-- model ID/revision;
-- complete local model format/loader/tokenizer/weight asset table and aggregate digest where local assets are used;
-- vector dimensions;
-- `dtype: "float16"`;
-- normalization state;
-- row count;
-- embedding scope;
-- row-order version;
-- vector backend/metric;
-- lexical index hash;
-- RRF configuration/version;
-- query-analysis rule-set/version/hash;
-- classifier rule-set/version/hash;
-- Phase 3 evaluation/gate result hashes;
-- updated `lineage.json` hash.
+- `algorithm_id`;
+- `configuration_sha256`;
+- `rank`;
+- `score`.
 
-The exact release-identity dependency graph must avoid recursion: content artifacts are built and hashed before `build_content_id`/`release_id` are derived, following the existing release contract.
+The package-level `retrieval_mode` records the resolved public mode. Do not add classifier-identity or per-channel RRF-contribution fields to closed objects unless the detailed design first introduces a versioned schema change.
 
-## 23. Work package Q: Runtime capability detection
+Required context/conflict provenance remains in existing `selection_roles`, `seed_source_ids`, `context_completeness`, `context_paths`, and `conflict_reasons` fields.
 
-At startup, after ordinary lower-phase release integrity validation, determine whether the active release supports Phase 3 dense/hybrid capability.
+## 20. Work package N — Runtime capability and failure behavior
 
-A release is dense-capable only when all required Phase 3 artifacts/configuration are present and valid.
+A release is dense-capable only if every required Phase 3 artifact/configuration passes release validation. A **release-capable hybrid evidence service** additionally requires the corrected Phase 2 context/conflict/evidence baseline.
 
-The installed runtime is dense-capable only when:
+Explicit hybrid requests fail visibly for missing/incompatible dense artifacts, model assets, backend, model-load timeout, vector mismatch, release quarantine, or missing corrected Phase 2 prerequisite.
 
-- required safe model loader/provider dependencies are installed;
-- the exact admitted model/provider and complete asset identity are supported;
-- the exact dense backend is available;
-- the runtime supports the release's schema/configuration versions.
+`auto` may choose only capabilities present in the runtime and active release and follows the design-defined typed warning/fallback rules.
 
-The capability view distinguishes:
+## 21. Work package O — Reproducibility, security, and performance
 
-- exact/lexical available;
-- dense available;
-- hybrid available;
-- `high_accuracy` available only to the extent already defined by the current design/runtime; Phase 4-specific reranker/supporting-context enhancements remain unavailable until implemented.
+### 21.1 Reproducibility
 
-Do not advertise hybrid success capability merely because an embeddings file exists.
+Require:
 
-## 24. Work package R: Failure behavior
+- deterministic row map;
+- byte-identical canonical `embeddings.f16.npy` for the same complete admitted build identity;
+- stable dense ranking;
+- stable RRF ordering;
+- stable classifier output;
+- stable release validation decision;
+- rollback restores matching catalog/vector/model/configuration/lineage state.
 
-Phase 3 failures must be explicit and deterministic.
+### 21.2 Security/privacy
 
-### 24.1 Build failures
+Retain local-first behavior, exhaustive local model-asset hashing, safe non-executable formats/loaders, no arbitrary pickle/model code hooks, no default runtime network access, no sensitive query/source/path leakage, and common admission/cancellation/quarantine behavior.
 
-Block the candidate release for:
+### 21.3 Performance
 
-- embedding-model load failure;
-- embedding dimension drift;
-- NaN/Inf vectors;
-- zero/invalid normalized vectors;
-- missing/duplicate row;
-- non-deterministic row mapping;
-- non-byte-reproducible canonical embedding artifact for identical complete build identity;
-- unsupported artifact dtype/schema;
-- oversized/malformed NumPy header;
-- checksum mismatch;
-- incomplete/stale model-asset binding;
-- evaluation gate failure;
-- held-out leakage;
-- stale benchmark/selection identity;
-- release-lineage mismatch.
+Only after quality gates pass, report separately:
 
-### 24.2 Runtime failures
-
-An explicit hybrid request fails rather than silently degrading for:
-
-- missing dense release artifact;
-- unsupported embedding model/revision or asset set;
-- query model load timeout/failure;
-- query dimension mismatch;
-- vector artifact integrity failure;
-- dense backend unavailable;
-- release quarantined.
-
-Reuse the common typed runtime error routing and safe detail allowlists already established by the lower-phase runtime contract. Phase 3 must not invent a second error envelope or a context-incomplete semantic-success branch.
-
-### 24.3 `auto` capability resolution
-
-The classifier/path resolver may choose only installed-and-release-supported capabilities. If `auto` selects a non-dense path because dense capability is unavailable, the decision must follow the current design's capability/warning semantics and still enter the same inherited context/conflict/evidence pipeline. An explicit hybrid request does not silently degrade.
-
-## 25. Work package S: Performance measurement
-
-Measure performance only after retrieval correctness and evidence-semantics gates pass.
-
-Report separately:
-
-- embedding build throughput;
-- embedding artifact size;
-- exact dense-search latency with precomputed query vector;
+- embedding build throughput/artifact size;
+- exact dense-search latency excluding query embedding;
 - warm query-embedding latency;
 - cold model-load latency;
-- end-to-end warm hybrid candidate latency;
-- end-to-end cold hybrid candidate latency;
-- lexical-only candidate latency;
-- inherited required-context/material-conflict closure latency separately where practical;
-- peak RSS with memory-mapped vectors;
-- incremental RSS after loading query model;
-- page-fault behavior for first dense query where practical;
-- candidate-pool sensitivity;
-- corpus-size scaling.
+- warm/cold hybrid latency;
+- lexical-only latency;
+- context/conflict closure latency separately where practical;
+- peak RSS and model-load incremental RSS;
+- corpus-size/candidate-pool sensitivity.
 
-Test at representative chunk counts around the design's scale hypotheses when practical:
+Do not introduce ANN merely because a synthetic larger corpus is slower; record the measured threshold for future evaluation.
 
-- <50k chunks;
-- 50k-300k synthetic/representative scale where available.
+## 22. Test plan
 
-Do not add ANN in this phase solely because a synthetic larger scale is slower. Record the measured threshold for future evaluation.
+### 22.1 Unit
 
-## 26. Work package T: Determinism and reproducibility
+Test:
 
-Phase 3 must satisfy immutable-release reproducibility.
-
-Required checks include:
-
-- same input release/build configuration produces the same row map;
-- same complete build identity produces byte-identical canonical `embeddings.f16.npy` bytes and SHA-256 across fresh admitted build processes/environments;
-- numerical tolerance is used only for numerical invariants such as normalization checks, never as a substitute for artifact byte equality;
-- the release artifact after canonical conversion is byte-stable under the admitted build environment;
-- exact dense ranking is stable;
-- RRF ranking is byte-for-byte/record-for-record deterministic;
-- classifier output is deterministic;
-- candidate provenance ordering is deterministic;
-- repeated release validation produces the same decision;
-- rollback restores the previous embedding/vector/fusion configuration together with the previous catalog, context/conflict artifacts, and lineage.
-
-If a model/provider cannot produce a byte-identical canonical release artifact for the same complete build identity, it must not be selected simply because its retrieval score is high.
-
-## 27. Work package U: Security and privacy
-
-Phase 3 must retain the lower-phase local-first security model.
-
-- local model assets are checksum verified exhaustively;
-- no arbitrary pickle model format;
-- no model loader arbitrary-code hooks;
-- no network access is introduced at runtime by default;
-- an external embedding provider, if ever benchmarked, is not selected without an explicit design/security/privacy decision;
-- queries, source text, and credentials are not written to unrestricted logs;
-- model paths and workspace paths are not exposed through public retrieval results;
-- malformed query inputs are rejected before model work according to the common MCP/input contract;
-- cancellation and request-count admission remain processable while a model is loading;
-- vector row indices are internal diagnostics, not trusted client-supplied locators.
-
-## 28. Test plan
-
-### 28.1 Unit tests
-
-Cover:
-
-- embedding-text projection;
-- provider metadata and complete asset-identity validation;
-- row-order generation;
-- canonical float16 conversion;
-- matrix normalization;
-- matrix shape/dtype/header validation;
+- embedding-text determinism;
+- model/provider/asset identity;
+- row order;
+- float16 conversion;
+- matrix header/shape/dtype/finite/normalization checks;
 - query-vector validation;
-- exact dot-product search;
-- deterministic top-K tie-breaking;
-- metadata filter semantics;
-- dense hit mapping;
-- RRF contributions;
-- candidate deduplication;
-- fused tie-breaking;
-- query feature extraction;
-- classifier rules;
-- candidate provenance serialization;
-- cache-key construction against the Section 25 dependency contract.
+- exact dense search and tie-breaking;
+- metadata filters;
+- dense mapping;
+- RRF/dedup/tie-breaking;
+- query preprocessing/features/classification;
+- Phase 3 campaign ledger/state transitions;
+- Section 25 cache keys;
+- closed Evidence Package retrieval/fusion serialization.
 
-### 28.2 Integration tests
+### 22.2 Integration
 
-Cover:
+After the corrected Phase 2 prerequisite exists, test:
 
-- build valid Phase 3 release from Phase 2 catalog;
-- byte-identical repeated embedding build;
-- mmap/reopen in a fresh runtime process with bounded safe `.npy` loading;
-- lazy-load exact bound query model asset set;
-- warm hybrid retrieval;
-- cold hybrid retrieval;
-- exact-mode query remains model-free;
-- lexical+dense fused result contains correct per-channel provenance;
-- wrong-edition high-similarity chunk is filtered/ordered correctly;
-- hybrid seed result receives inherited required context and material-conflict closure;
-- Python/CLI/MCP project identical evidence semantics after hybrid seed selection;
-- checksum corruption blocks startup;
-- model asset corruption/quarantine follows the common runtime contract;
-- rollback changes the active vector/model configuration atomically with the release while restoring the matching catalog/context/conflict/lineage artifacts.
+- complete Phase 3 release build;
+- repeated byte-identical embedding build;
+- fresh-process read-only mmap;
+- cold/warm query model behavior;
+- exact mode remains model-free;
+- hybrid retrieval through the shared evidence pipeline;
+- wrong-edition hard negatives;
+- complete required context/conflicts;
+- Python/CLI/MCP equivalence;
+- corruption/quarantine;
+- activation and rollback.
 
-### 28.3 Boundary/negative tests
+### 22.3 Negative/boundary
 
 Include:
 
-- zero-norm query vector;
-- wrong vector dimensions;
-- NaN/Inf query/model output;
-- duplicate chunk row;
-- missing chunk row;
-- extra vector row;
-- mixed document/chunk scope;
-- non-`float16` release dtype;
-- NumPy header over 10,000 bytes;
-- object/structured dtype or pickle-backed matrix attempt;
-- writable memory map attempt;
-- identical similarity scores across several candidates;
-- lexical/dense duplicate source;
-- same text in two editions;
-- empty dense result after filters;
-- model-load timeout;
-- cancelled cold hybrid request;
-- request deadline during dense search;
-- explicit hybrid when runtime dependency absent;
-- classifier query with both clause number and natural-language question;
+- zero-norm/wrong-dimension/NaN/Inf query vectors;
+- missing/extra/duplicate vector rows;
+- non-float16/object/structured dtype;
+- >10,000-byte NumPy header;
+- writable mmap attempt;
+- same text in different editions;
+- dense empty after filters;
+- explicit hybrid without capability/prerequisite;
+- model-load timeout/cancellation/deadline;
+- ambiguous exact+natural-language query;
 - false identifier-looking token;
-- negative wording such as "not permitted";
-- numeric/unit query where semantic similarity must not erase exact numeric constraints;
-- hybrid seed whose required context exceeds bounds, proving the existing typed failure path is retained;
-- hybrid seed intersecting one material conflict side, proving all required sides remain present.
+- negation;
+- numeric/unit semantic hard negatives;
+- context-limit overflow;
+- one-sided conflict seed;
+- observed confirmation split reused by changed candidate;
+- second decisive final confirmation in one campaign;
+- reproduction-only replay incorrectly treated as new release evidence.
 
-### 28.4 Evaluation tests
+## 23. Implementation sequence
 
-Run the complete Phase 3 retrieval gate suite on the frozen held-out confirmation data only after configuration freeze, including the downstream evidence-semantics regressions from Section 18.5.
+1. Merge/validate the separate Phase 2 corrective prerequisite before release-capable Phase 3 integration or final confirmation.
+2. Freeze Phase 3 schemas/interfaces and test fixtures.
+3. Implement deterministic embedding-text projection.
+4. Implement embedding-provider and model-asset identity.
+5. Build benchmark harness.
+6. Benchmark/select/freeze model on selection data.
+7. Build canonical chunk embeddings.
+8. Build/validate deterministic row map.
+9. Implement bounded safe artifact loader.
+10. Implement exact dense backend and canonical hit mapping.
+11. Implement lazy current-query embedding.
+12. Implement lexical+dense deduplication and RRF.
+13. Benchmark candidate pools/RRF on selection data.
+14. Implement deterministic query preprocessing/analysis/classification.
+15. Integrate hybrid seeds with the corrected Phase 2 evidence service.
+16. Implement Section 25 invalidation and Phase 3 release identity.
+17. Implement query-independent lineage additions and closed-schema runtime provenance.
+18. Add unit/integration/negative/reproducibility/security tests.
+19. Add comparative retrieval and downstream evidence-semantics evaluation.
+20. Freeze the complete Phase 3 candidate identity.
+21. Preregister the Phase 3 campaign and final confirmation split.
+22. Run the single final decisive confirmation under the Phase 3 campaign policy.
+23. Produce final benchmark/gate/performance/release reports.
+24. Validate activation and rollback.
+25. Record Phase 4 handoff without implementing Phase 4.
 
-## 29. Suggested implementation sequence
+## 24. Acceptance criteria
 
-Execute in this order so each step has a clear dependency and test boundary.
+Phase 3 is complete only when:
 
-1. Freeze Phase 3 schemas/interfaces and branch-local test fixtures.
-2. Validate the Phase 2 chunk enumeration and shared evidence-service handoff.
-3. Implement deterministic `embedding_text` projection and hashes.
-4. Implement embedding-provider abstraction and complete model-asset identity.
-5. Build the benchmark harness before selecting a model.
-6. Benchmark candidate embedding models on development/model-selection data.
-7. Select/freeze the embedding candidate with a decision artifact.
-8. Implement canonical offline chunk embedding generation to byte-stable `embeddings.f16.npy`.
-9. Implement deterministic row-map generation and independent validation.
-10. Implement bounded safe `.npy` release artifact validation.
-11. Implement memory-mapped exact dense backend.
-12. Implement dense hit → Phase 2 source mapping and filters.
-13. Integrate supervised lazy current-query embedding with complete asset recheck.
-14. Implement typed dense candidate provenance.
-15. Implement lexical+dense source-identity deduplication.
-16. Implement RRF with versioned configuration and deterministic ties.
-17. Benchmark candidate pools and RRF parameters on model-selection data.
-18. Implement deterministic query feature extraction.
-19. Implement deterministic query classification/path resolution.
-20. Compose Phase 3 seed selection with the inherited required-context/material-conflict closure and shared Python/CLI/MCP service.
-21. Add comparative exact/lexical/dense/hybrid and downstream evidence-semantics evaluation.
-22. Add full Section 25 cache dependencies and Phase 3 lineage transformations.
-23. Add Phase 3 release manifest/build identity inputs including complete model-asset binding.
-24. Add release validation/startup validation.
-25. Run negative, corruption, cancellation, rollback, and reproducibility suites.
-26. Freeze the complete Phase 3 candidate identity.
-27. Run the untouched held-out/confirmation retrieval gates under the existing retry policy.
-28. Produce final Phase 3 benchmark/gate report.
-29. Activate a Phase 3 release in integration tests and verify rollback to an earlier release as applicable.
-30. Record the corrected Phase 4 handoff without implementing Phase 4.
+1. the separate Phase 2 corrective prerequisite is merged and validated;
+2. the embedding provider is replaceable and model-native objects do not leak into canonical/public contracts;
+3. model selection is supported by project-specific multilingual/hard-negative evidence;
+4. every persisted chunk has exactly one vector and no non-chunk vector rows exist;
+5. vector row order is exactly the versioned canonical order and independently reconstructable;
+6. the v0.1 artifact is exactly safe read-only `float16` `embeddings.f16.npy` with bounded header/pickle-disabled loading;
+7. complete model/provider/asset identity is bound into build/release/runtime compatibility;
+8. deterministic query preprocessing is release-bound and included in frozen candidate identity;
+9. identical complete build identity produces byte-identical canonical embedding bytes/hash;
+10. exact dense search and top-K ordering are deterministic;
+11. dense hits map one-to-one to canonical lower-phase identity;
+12. metadata/edition safety is preserved;
+13. RRF is versioned, benchmark-selected, deterministic, and canonical-ID based;
+14. query analysis/classification is deterministic and non-LLM;
+15. exact-style queries retain exact/lexical protections;
+16. natural-language queries execute the hybrid path when capability exists;
+17. explicit hybrid failures are visible, not silently relabelled fallbacks;
+18. Recall@20 and Top-5 Wilson gates pass with required sample sizes/stratification;
+19. critical exact/numeric/identifier/wrong-edition/negation strata do not regress unacceptably;
+20. the Phase 3 campaign retires observed decisive splits, restricts identical-candidate replay to reproduction, has one final decisive confirmation per campaign, and requires fresh decisive data after failed campaigns;
+21. Section 25 cache/release invalidation covers every behavior-bearing Phase 3 input;
+22. immutable `lineage.json` contains only query-independent Phase 3 transformations/artifacts/configuration identities;
+23. request-specific retrieval provenance uses only the existing closed `assembly.retrievals[]`, `assembly.fusion`, package-level `retrieval_mode`, and existing context/conflict fields;
+24. no unversioned Evidence Package fields are introduced;
+25. hybrid retrieval composes with corrected Phase 2 required context/conflict semantics without weakening citations/source/edition identity;
+26. corruption/model integrity failure follows fail-closed/quarantine semantics;
+27. cancellation/deadline/model loading uses the common runtime terminal-state implementation;
+28. documentation, unit, integration, negative, reproducibility, release, activation, and rollback checks pass;
+29. no Phase 2 corrective implementation detail is pulled into Phase 3;
+30. no Phase 4 reranking/supporting-context/table/xref/high-accuracy warning/refusal implementation is pulled into Phase 3.
 
-## 30. Acceptance criteria
+## 25. Phase 3 exit artifacts
 
-Phase 3 is complete only when all applicable criteria below are true.
+The merged plan requires the implementation to produce:
 
-1. A replaceable embedding-provider contract exists and no model-native object leaks into public canonical/retrieval interfaces.
-2. The selected embedding model is supported by a reproducible project-corpus benchmark, including English, Chinese, cross-language, engineering terminology, identifiers, numbers/units, synonyms, negation, and exceptions.
-3. Exactly one release embedding exists for every persisted Phase 2 chunk.
-4. The vector matrix contains no document-level or sentinel rows.
-5. Row order is exactly `(document_id, canonical_order, chunk_id)` and is independently reconstructed at release validation.
-6. The v0.1 matrix is exactly `embeddings.f16.npy`, actual/declared `float16`, safe-loaded read-only with `allow_pickle=False` and `max_header_size=10000`, with no object/structured dtype.
-7. Manifest shape/dtype/normalization/model/complete-asset/row-order metadata matches the actual artifact exactly.
-8. Query embedding uses the exact model/revision/configuration and complete asset identity compatible with the active release.
-9. Same complete build identity produces byte-identical canonical embedding artifact bytes and SHA-256.
-10. Exact dense search is deterministic and memory-mapped.
-11. Dense candidates map one-to-one to canonical Phase 2 chunks/sources.
-12. Metadata filters preserve document and edition safety.
-13. Lexical and dense candidates are deduplicated by canonical source identity, not text similarity.
-14. RRF is versioned, benchmark-selected, reproducible, and deterministically ordered.
-15. Every fused candidate retains complete lexical/dense/fusion retrieval provenance.
-16. Query analysis deterministically detects the design-required feature families.
-17. Query classification is deterministic and does not rely on an LLM.
-18. Exact-style queries are not forced through dense retrieval.
-19. Natural-language queries can execute the Phase 3 lexical+dense hybrid path.
-20. The Phase 3 hybrid path is exposed through the existing shared retrieval service/interfaces and preserves the inherited required-context/material-conflict closure, strict Evidence Package semantics, citations, lineage, typed failures, and edition/source identity.
-21. Explicit hybrid capability failure is visible rather than silently relabelling lexical retrieval.
-22. The frozen Phase 3 retrieval candidate passes Recall@20 with one-sided 95% Wilson lower bound >=98% on the applicable held-out confirmation set.
-23. The frozen Phase 3 retrieval candidate passes Top-5 with one-sided 95% Wilson lower bound >=95% on the applicable held-out confirmation set.
-24. Every probabilistic result reports numerator, denominator, point estimate, and lower confidence bound with required sample sizes/stratification.
-25. Critical exact/numeric/identifier/wrong-edition/negation strata have no unacceptable regression hidden by a better global average.
-26. Hybrid retrieval does not drop required scope/applicability/dependencies/definitions/exceptions/table context or any material conflict side.
-27. Embedding/vector/fusion/classifier changes invalidate the complete correct Section 25 caches and release identity.
-28. `lineage.json` contains the Phase 3 embedding/vector transformation identities, complete model-asset identity, artifact hashes, and retrieval-channel provenance while preserving lower-phase source/build/assembly provenance.
-29. Release validation fails closed for corrupted, mismatched, unsupported, incompletely mapped, non-byte-reproducible, or incompletely bound vector/model artifacts.
-30. Lazy model integrity failure follows the existing quarantine contract.
-31. Cancellation/deadline/model-load behavior uses the common runtime terminal-state implementation.
-32. Documentation-quality, unit, integration, negative, reproducibility, release, activation, and rollback tests all pass.
-33. No Phase 4 reranker, extra supporting-context expansion, Phase 4 table/cross-reference improvement, or high-accuracy warning/refusal evaluation implementation has been pulled into the Phase 3 PR.
-
-## 31. Phase 3 exit artifacts
-
-At merge, the Phase 3 implementation should be able to produce a complete decision/evidence package containing:
-
-- selected embedding model/revision/configuration and complete model-asset identity;
+- selected model/provider/asset decision record;
 - embedding benchmark report;
-- embedding-text schema/configuration;
-- byte-identical embedding artifact metadata/hash;
-- deterministic row-map identity;
-- exact dense backend/metric/configuration;
-- RRF configuration;
-- query-analysis/classifier rule-set/configuration;
-- cache/build identity hashes;
-- updated release and runtime retrieval lineage;
-- comparative lexical/dense/hybrid evaluation report;
-- downstream required-context/material-conflict semantics regression report;
-- held-out confirmation gate report;
+- embedding-text and query-preprocessing identities;
+- canonical embedding artifact metadata/hash;
+- row-map identity;
+- dense backend/metric identity;
+- RRF identity;
+- query-analysis/classifier identity;
+- Section 25 cache/build identities;
+- query-independent Phase 3 lineage update;
+- request-scoped retrieval/fusion assembly provenance using the closed schema;
+- lexical/dense/hybrid comparative report;
+- downstream context/conflict regression report;
+- Phase 3 campaign ledger and final confirmation report;
 - cold/warm/model-free performance report;
-- release validation result;
-- rollback validation result.
+- release-validation and rollback evidence.
 
-These artifacts make the Phase 3 choice auditable and reproducible.
+## 26. Handoff to Phase 4
 
-## 32. Handoff to Phase 4
+After the corrected Phase 2 prerequisite and Phase 3 gates are satisfied, Phase 4 receives:
 
-Phase 4 receives a stable shared evidence pipeline with:
-
-- exact/lexical Phase 2 retrieval intact;
+- exact/lexical retrieval intact;
 - dense chunk retrieval;
 - lexical+dense RRF;
-- deterministic query analysis/classification;
-- complete retrieval-channel provenance;
-- inherited deterministic required-context and material-conflict closure;
-- strict ordinary Evidence Package behavior already preserved across retrieval modes;
+- deterministic query preprocessing/analysis/classification;
+- closed-schema retrieval provenance;
+- ordinary Phase 2 required-context/material-conflict closure;
+- strict ordinary Evidence Package behavior;
 - immutable embedding/vector artifacts;
-- release-bound model/configuration/asset identity;
-- expanded regression evaluation.
+- release-bound model/configuration identity;
+- expanded evaluation evidence.
 
-Phase 4 then owns only the current design-defined high-accuracy additions:
+Phase 4 then adds only the high-accuracy work assigned by current `docs/design.md`:
 
 - cross-encoder reranking;
-- additional supporting-context expansion for high-accuracy retrieval;
-- high-accuracy table improvements;
-- high-accuracy cross-reference improvements;
-- expanded typed-warning and refusal evaluation for high-accuracy retrieval.
+- supporting-context expansion;
+- improved tables/cross-references;
+- expanded high-accuracy typed-warning/refusal evaluation.
 
-Phase 4 does **not** newly introduce ordinary required-context/material-conflict closure or the basic strict Evidence Package contract; Phase 3 inherits and preserves those lower-phase correctness guarantees.
+## 27. Definition of done
 
-Phase 3 must not pre-implement the Phase 4 additions merely to make its hybrid candidate layer appear more accurate.
+The Phase 3 plan PR is ready to merge only when:
 
-## 33. Definition of done
-
-The Phase 3 PR is ready to merge only when:
-
-- the implementation remains within the Phase 3 boundary;
-- all repository checks pass on the exact PR head;
-- the Phase 3 retrieval and downstream evidence-semantics gates pass on the correctly isolated evaluation data;
-- all actionable review comments that are genuinely Phase 3 scope are fixed and replied to;
-- all resolved review threads are marked resolved;
-- out-of-scope Phase 4 feedback is explicitly deferred rather than implemented;
-- reviewers have no further Phase 3 comments on the exact final head;
-- the PR description matches the final Phase 3 plan/implementation state;
-- the final head is merged into `master` before any later-phase work begins.
+- all repository checks pass on the exact final head;
+- all actionable Phase 3 review comments are fixed, replied to, and resolved;
+- reviewers report no further Phase 3 findings on the exact final head;
+- the PR description matches the final plan set;
+- the Phase 2 corrective prerequisite is clearly recorded without being implemented inside this PR;
+- Phase 4 work remains deferred;
+- the final head is merged before beginning the next implementation-plan PR.
