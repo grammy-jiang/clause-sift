@@ -964,6 +964,28 @@ The public mode enum is `auto`, `exact`, `hybrid`, and `high_accuracy`. The runt
 
 Context correctness is independent of the candidate-selection accelerator. After seeds are selected, `exact`, `hybrid`, and `high_accuracy` all run the required-context closure in Section 19; an implementation cannot omit an applicability condition or exception merely because a faster mode was requested. `high_accuracy` additionally enables supporting context. Diagnostic context is returned only by an explicit diagnostic `get_context` request and never enters an ordinary answer silently. `auto` inherits the context profile of the concrete mode it resolves to, and the resolved mode is recorded in assembly lineage.
 
+The following success-path overview is a reading aid; the mode and traversal contracts above and in Sections 19–22 remain authoritative:
+
+```mermaid
+flowchart TD
+    REQ[search_evidence request] --> VALID[Validate schema, bounds, and filters]
+    VALID --> ANALYZE[Analyze query and resolve auto mode]
+    ANALYZE --> MODE{Resolved mode}
+    MODE -->|exact| EXACT[Metadata, exact, and lexical retrieval]
+    MODE -->|hybrid| HYBRID[Lexical and dense retrieval plus fusion]
+    MODE -->|high_accuracy| HIGH[Exact, lexical, and dense retrieval plus fusion]
+    HIGH --> RERANK[Cross-encoder reranking]
+    EXACT --> SEEDS[Ranked source seeds]
+    HYBRID --> SEEDS
+    RERANK --> SEEDS
+    SEEDS --> REQUIRED[Required graph and material-conflict fixed point]
+    REQUIRED --> SUPPORT{Resolved mode is high_accuracy?}
+    SUPPORT -->|yes| OPTIONAL[Supporting context traversal]
+    SUPPORT -->|no| SERIALIZE[Attach lineage and typed warnings]
+    OPTIONAL --> SERIALIZE
+    SERIALIZE --> PACKAGE[Evidence Package]
+```
+
 ---
 
 ## 18. Candidate fusion and reranking
@@ -1069,6 +1091,32 @@ The runtime creates one seed record for every member node of every directly retu
 
 Required candidates are therefore exhausted before supporting or diagnostic candidates. Every queue entry carries its originating seed, context class, complete ordered edge/node prefix, and current target. The traversal deduplicates only the exact path state `(seed_source_id, context_class, ordered edge-ID sequence, current target_document_id, current target_node_id)`; materialized objects may still deduplicate by source or node identity and merge their paths. A later arrival at an already materialized target through a different context class or edge prefix is a distinct path state and expands that target's eligible outgoing rules with its own prefix. Thus both arms of `A -> B1 -> C` and `A -> B2 -> C` propagate through `C -> D`, and `D` retains both complete paths. There is no target-only visited set.
 
+This diagram summarizes the required-first control flow; the queue tuple, materialization rules, and numeric bounds in this section define the exact behavior:
+
+```mermaid
+flowchart TD
+    SEED[Ordered member nodes from ranked sources] --> CANDIDATE[Generate a required path-state candidate]
+    CANDIDATE --> CYCLE_CHECK{Would it repeat a path-local node?}
+    CYCLE_CHECK -->|yes| CYCLE[Record warning and discard the candidate]
+    CYCLE --> QUEUE
+    CYCLE_CHECK -->|no| BOUND_CHECK{Candidate fits every required enqueue bound?}
+    BOUND_CHECK -->|no| FAIL[Return context_limit_exceeded with no partial package]
+    BOUND_CHECK -->|yes| QUEUE[Required priority queue]
+    QUEUE -->|dequeue next path state| MATERIALIZE[Materialize a source cover or metadata-only target]
+    MATERIALIZE --> RETAIN[Retain the independent path and generate eligible required candidates]
+    RETAIN --> CANDIDATE
+    QUEUE -->|required queue drained| CONFLICT{Material-conflict closure step}
+    CONFLICT -->|new cover source| CANDIDATE
+    CONFLICT -->|record only| QUEUE
+    CONFLICT -->|required conflict bound exceeded| FAIL
+    CONFLICT -->|fixed point reached| OPTIONAL{Supporting or diagnostic context requested?}
+    OPTIONAL -->|yes| OPTIONAL_RUN[Traverse optional entries in deterministic order]
+    OPTIONAL -->|no| FINALIZE[Deduplicate objects, preserve paths, and order output]
+    OPTIONAL_RUN -->|complete| FINALIZE
+    OPTIONAL_RUN -->|next entry exceeds a bound| TRUNCATE[Stop before that entry and mark truncated_optional]
+    TRUNCATE --> FINALIZE
+```
+
 Path-local edge/node tracking prevents recursion: encountering an allowed `references` or `depends_on` cycle records the finite path up to the first repeated node, does not enqueue the repeated step, and emits one deterministically keyed `context_cycle_detected` warning. Structural, governing, amendment, or supersession cycles never reach runtime because release validation rejects them. The semantic-depth, per-object path, total-step, object, and byte bounds apply while path states are enqueued; exceeding a required bound returns `context_limit_exceeded`, while an optional path is truncated only under the deterministic policy below. These bounds contain reconvergent simple-path growth without discarding an in-bound independent prefix.
 
 “Required closure” is the least fixed point of required typed traversal and Section 20.3 material-conflict closure. After the required graph queue drains, conflicts sort by `conflict_id`; positions sort by `position_order`; and each position's compiled cover sources sort by `conflict_position_sources.selection_order` then `source_id`. Every cover source not already materialized enters the required graph queue with a deterministic key after the source that triggered the conflict. The runtime repeats until neither phase adds a source or record, deduplicating materialized objects by release-scoped source/conflict ID while retaining the independent path/reason records. Only then may supporting traversal begin. Conflict records are not graph edges and do not consume semantic path depth, but their added sources, reasons, positions, and complete source bytes consume the explicit bounds below. This fixed point ensures that a conflict side cannot arrive without its own applicability/exception context and that a newly attached side cannot hide another admitted material conflict.
@@ -1113,6 +1161,28 @@ Every source and target remains bound to its exact `document_id`, edition, and s
 ### 20.1 Canonical relationship contract
 
 Evidence Graph relationships are either **structural** edges derived from the validated canonical document model or **semantic** edges whose meaning is source-grounded and relation-specific. Each canonical name has one direction and one meaning across parsers, storage adapters, traversal code, reports, and public evidence. Every endpoint category below uses the exact Section 12.2 node-type vocabulary; an `unclassified` node never satisfies a more specific category. Storage may use foreign keys, relation rows, or derived views; those representations must expose the same logical edges.
+
+The diagram shows canonical edge directions only; the endpoint, origin, resolution, traversal, and cycle rules in the tables remain normative:
+
+```mermaid
+flowchart TB
+    subgraph STRUCTURAL[Structural relations]
+        direction LR
+        PARENT[Immediate parent node] -->|contains| CHILD[Immediate child node]
+        NODE[Canonical node] -->|precedes| NEXT[Immediate next node]
+    end
+
+    subgraph SEMANTIC[Semantic relations]
+        direction LR
+        CITER[Any source-bearing node] -->|references| CITED[Addressable node or document root]
+        DEPENDENT[Requirement, clause, subclause, paragraph, table row, or exception] -->|depends_on| DEPENDENCY[Requirement, clause, subclause, definition, table, or document]
+        EXCEPTION[Exception] -->|exception_to| AFFECTED[Requirement, clause, subclause, paragraph, or table row]
+        DEFINITION[Definition] -->|defines| SCOPE[Document, part, chapter, section, clause, subclause, or appendix]
+        NEWER[Newer document root] -->|supersedes| OLDER[Older document root]
+        AMENDING[Amending document root] -->|amends| TARGET[Document root or addressable node]
+        GOVERNED[Requirement, clause, subclause, paragraph, table row, or exception] -->|applies_subject_to| APPLICABILITY[Document, part, chapter, section, clause, subclause, paragraph, requirement, exception, table, table row, or appendix]
+    end
+```
 
 The canonical structural relations are:
 
@@ -1294,6 +1364,23 @@ The conflict lifecycle is:
 | `confirmed` | At least two source positions have incompatible compliance sets or normative effects under the same known subject and applicability context. Confirmation comes from an exact deterministic rule or immutable human review, never solely from a model score. | May ship when every position and decision is complete. It always remains visible when material and emits `evidence_conflict`; a genuine source conflict is not itself a corrupt build. |
 | `explained` | A deterministic typed relation or trusted metadata proves why the positions are not jointly incompatible: for example unit equivalence, exception, amendment, supersession, disjoint applicability, or compatible modalities. | Retained for audit and false-positive evaluation. Ordinary answers omit it; explicit comparison or diagnostic requests may return it without a conflict warning. |
 | `unresolved` | The known evidence is insufficient to prove either incompatibility or a valid explanation, including missing applicability or precedence facts. | A record touching only `release_tier: standard` documents may ship with `conflict_unresolved`; a record touching any `release_tier: critical` document blocks release pending corrected metadata, source/parser data, or immutable review. |
+
+This lifecycle view is non-normative shorthand for the state and admission rules above:
+
+```mermaid
+flowchart TD
+    INPUT[Deterministic detector, human submission, or future model proposal] --> POTENTIAL[potential build diagnostic]
+    POTENTIAL --> CONTEXT[Attach required context and canonical position covers]
+    CONTEXT --> DECIDE{Classification evidence}
+    DECIDE -->|Exact incompatibility or immutable human review| CONFIRMED[confirmed]
+    DECIDE -->|Typed explanation or immutable human review| EXPLAINED[explained]
+    DECIDE -->|Evidence remains insufficient| UNRESOLVED[unresolved]
+    CONFIRMED --> CONFIRMED_RELEASE[Admit complete record and expose every material position]
+    EXPLAINED --> EXPLAINED_RELEASE[Retain for audit; expose only for comparison or diagnostics]
+    UNRESOLVED --> TIER{Touches a critical document?}
+    TIER -->|yes| BLOCK[Block release]
+    TIER -->|no| STANDARD_RELEASE[Admit with conflict_unresolved]
+```
 
 Each candidate has one content-addressed identity. `conflict_id` is a domain-separated SHA-256 of the RFC 8785 canonical candidate-identity object containing its identity-schema version; detector ID, version, and configuration hash; conflict and context rule-set versions and configuration hashes; canonical comparison-key hash; ordered dimensions; and canonically sorted position identities. Each position identity contains its comparison-projection hash, required-context-projection hash, and ordered exact span tuples `(document_id, node_id, node_text_start, node_text_end, source_text_sha256)`. `conflict_position_id` is a separate domain-separated SHA-256 of the candidate-identity hash plus that complete position identity, so changing any position invalidates every position reference in the decision. Position order follows the sorted canonical position-identity bytes.
 
@@ -1896,6 +1983,35 @@ The full-PDF page contract avoids pretending that a renderer-created image is an
 - Cancellation of an in-progress request follows the per-request revision on the `2026-07-28` path or the initialized session revision on the `2025-11-25` path. Retrieval stops promptly, releases temporary resources, records a non-response cancellation event, and does not publish a partial success or a second tool response. Each request owns an atomic terminal state initially `pending`; success, tool error, cancellation, and server deadline each attempt one compare-and-set transition. The first successful transition is authoritative, including when events carry equal monotonic timestamps, and every losing completion is discarded before serialization.
 - Progress notifications are emitted only when the client supplied a progress token and the applicable per-request or session revision supports them.
 
+The principal routing surfaces are summarized below. It intentionally omits per-code detail fields; the bullets above and Section 31 define the exact wire behavior:
+
+```mermaid
+flowchart TD
+    FRAME[Inbound stdio frame] --> ENVELOPE{Bounded, valid JSON-RPC and MCP message?}
+    ENVELOPE -->|no| PROTOCOL[Protocol-level JSON-RPC error; no application handler]
+    ENVELOPE -->|yes| MESSAGE{MCP message kind}
+    MESSAGE -->|cancellation notification| CANCEL[Race the atomic terminal state; publish no cancellation response]
+    MESSAGE -->|other protocol message| PROTOCOL_CONTROL[Handle at the protocol layer; no application work]
+    MESSAGE -->|work request| REQUEST{Valid MCP request shape?}
+    REQUEST -->|no| PROTOCOL
+    REQUEST -->|yes| SURFACE{Request surface}
+    SURFACE -->|tools/call| TOOL_SHAPE{Known tool and valid MCP call shape?}
+    TOOL_SHAPE -->|no| PROTOCOL
+    TOOL_SHAPE -->|yes| TOOL_ADMIT{Work admitted?}
+    TOOL_ADMIT -->|no| BUSY[JSON-RPC -32000 Server busy]
+    TOOL_ADMIT -->|yes| TOOL{Semantic validation and execution succeed?}
+    TOOL -->|yes| TOOL_SUCCESS[Success result with structuredContent and legacy text]
+    TOOL -->|no| TOOL_ERROR[isError true with one typed error text and no structuredContent]
+    SURFACE -->|resources/read| URI{Canonical resource URI?}
+    URI -->|malformed| INVALID_URI[JSON-RPC -32602 with no contents]
+    URI -->|well-formed but unknown| UNKNOWN_URI[2026 path: -32602; 2025 session: -32002]
+    URI -->|known| RESOURCE_ADMIT{Work admitted and response budget reserved?}
+    RESOURCE_ADMIT -->|no| BUSY
+    RESOURCE_ADMIT -->|yes| RESOURCE{Integrity and required closure succeed?}
+    RESOURCE -->|yes| RESOURCE_SUCCESS[Success with exactly one content item]
+    RESOURCE -->|no| RESOURCE_ERROR[JSON-RPC -32603 with safe typed data and no contents]
+```
+
 ### 22.5 Worked tool sequence
 
 For “When may mechanical smoke exhaust be omitted?” the client performs this sequence:
@@ -1959,6 +2075,34 @@ The intended build sequence is:
 24. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, lineage, all-side conflict, and rollback smoke tests.
 25. Publish the release and atomically update the active pointer.
 
+This stage-and-gate view is explanatory; the numbered sequence above defines the complete order and each section cited there defines its gate:
+
+```mermaid
+flowchart TD
+    INPUTS[Sources, manifests, vocabulary, and build inputs] --> ADMISSION[Hash, approve, detect changes, and select parser routes]
+    ADMISSION --> PARSE[Produce parser-neutral artifacts]
+    PARSE --> PARSER_REPORT[Persist the parser-validation report]
+    PARSER_REPORT --> PARSER_GATE{Parser validation and comparison pass?}
+    PARSER_GATE -->|no| DIAGNOSTICS[Retain durable diagnostics; active pointer unchanged]
+    PARSER_GATE -->|yes| CANONICAL[Build canonical trees, page provenance, and chunks]
+    CANONICAL --> GRAPH[Resolve edges and classify conflict candidates]
+    GRAPH --> CATALOG_GATE{Candidate catalog validation passes?}
+    CATALOG_GATE -->|no| DIAGNOSTICS
+    CATALOG_GATE -->|yes| RETRIEVAL[Build embeddings, lexical index, and vector index]
+    RETRIEVAL --> LINEAGE_GATE{Traversal validation and lineage materialization pass?}
+    LINEAGE_GATE -->|no| DIAGNOSTICS
+    LINEAGE_GATE -->|yes| EVALUATION[Derive build_content_id, run evaluation, and persist results or a sanitized failure record]
+    EVALUATION --> REPORTS[Finalize static review reports]
+    REPORTS --> QUALITY_GATE{Quality gates pass?}
+    QUALITY_GATE -->|no| DIAGNOSTICS
+    QUALITY_GATE -->|yes| BLOCKER_GATE{No release-blocking finding remains?}
+    BLOCKER_GATE -->|no| DIAGNOSTICS
+    BLOCKER_GATE -->|yes| CANDIDATE[Assemble candidate release]
+    CANDIDATE --> RELEASE_GATE{Checksums and read-only smoke tests pass?}
+    RELEASE_GATE -->|no| DIAGNOSTICS
+    RELEASE_GATE -->|yes| ACTIVATE[Publish and atomically replace active.json]
+```
+
 A failure through candidate validation at step 24 must leave `active.json` unchanged. Once step 25 begins its atomic replacement, a crash before the post-replacement directory flush may recover either the complete old or complete new record; recovery verifies the referenced release and records that observed outcome before serving. It never guesses, combines records, or exposes a missing/torn pointer, and a recovered valid new record completes the activation rather than reporting that the active release stayed old.
 
 The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, vocabulary/classification, chunk, conflict, and catalog diagnostics but produces no embedding, lexical-index, vector-index, or lineage artifact. Evaluation gate enforcement is likewise unreachable until step 19 has finalized a report bound to the same deterministic `build_content_id` and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 20 while retaining that diagnostic report. A wall-clock or random operational run ID exists only in the external operator lifecycle ledger and never enters a release-admitted report or evaluation artifact. Tests must inject failures at vocabulary loading/classification, conflict classification/review, the catalog gate, lineage finalization, evaluation execution and quality gate, and before and during candidate validation, proving that required diagnostics remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
@@ -2012,6 +2156,44 @@ conflict_review_artifact_sha256
 ```
 
 The list above is the dependency vocabulary, not one flat cache key. Each artifact hashes only its declared inputs below, including the hashes of upstream artifacts rather than their paths.
+
+The content-addressed dependency graph below shows the major upstream artifact-hash flows. Every node also incorporates the direct source, manifest, version, configuration, review, and toolchain identities in its table row; that table remains authoritative for every identity input and invalidation edge:
+
+```mermaid
+flowchart TD
+    SOURCE[Approved source bytes and manifest] --> PARSER[Parser-neutral output]
+    PARSER --> REPORT[Passing parser-validation report]
+    REPORT --> MODEL[Canonical model]
+    PARSER --> MODEL
+    MODEL --> PAGE[Page-provenance map]
+    PARSER --> PAGE
+    MODEL --> CHUNKS[Chunks and source rows]
+    PAGE --> CHUNKS
+    MODEL --> REFERENCES[Cross-references]
+    MODEL --> CONFLICTS[Conflict analysis]
+    PAGE --> CONFLICTS
+    CHUNKS --> CONFLICTS
+    REFERENCES --> CONFLICTS
+    CHUNKS --> EMBEDDINGS[Chunk embeddings]
+    CHUNKS --> LEXICAL[Lexical index]
+    EMBEDDINGS --> VECTOR[Vector index]
+    MODEL --> GRAPH_HASHES[Canonical catalog, graph, and provenance hash set]
+    PAGE --> GRAPH_HASHES
+    CHUNKS --> GRAPH_HASHES
+    REFERENCES --> GRAPH_HASHES
+    CONFLICTS --> GRAPH_HASHES
+    EMBEDDINGS --> RETRIEVAL_HASHES[Retrieval artifact hash set]
+    LEXICAL --> RETRIEVAL_HASHES
+    VECTOR --> RETRIEVAL_HASHES
+    REPORT --> LINEAGE[Evidence lineage]
+    GRAPH_HASHES --> LINEAGE
+    RETRIEVAL_HASHES --> LINEAGE
+    LINEAGE --> RELEASE[Release assembly]
+    GRAPH_HASHES --> RELEASE
+    RETRIEVAL_HASHES --> RELEASE
+```
+
+A cache hit reuses bytes only when that artifact's complete declared identity matches; it bypasses no downstream validation or release gate.
 
 | Cached artifact | Required cache-identity inputs |
 | --- | --- |
@@ -2130,6 +2312,26 @@ If the attempt-level model-load deadline wins that transition, the supervisor ma
 If the overall deadline expires first for any cold, warm, or model-free tool call and wins the Section 22 atomic terminal transition, request-specific work stops promptly, temporary resources are released, and no partial success is published. The server returns exactly one `isError: true` tool result with `code: request_deadline_exceeded`, `phase: runtime`, `severity: blocking`, the code-owned message `Request deadline exceeded`, and safe details limited to `operation` and configured `deadline_ms`; it emits no success or second response. Expiry detaches only that caller from a shared model-load attempt and does not abort an attempt with another live waiter. Cancellation that wins the transition follows the non-response rule; success or another tool error that commits first remains the sole response even if cancellation or deadline observation follows. If cancellation or overall expiry removes the attempt's final live waiter, the supervisor terminates and reaps the worker, clears the attempt without publishing a handle, and does not count that no-waiter abort as a model failure or open the failure cooldown. Tests use an injectable monotonic clock plus synchronization barriers to force cancellation-first, deadline-first, completion-first, and equal-timestamp transition attempts without wall-clock sleeps. Configured values, winning outcome, and latency are recorded in performance results.
 
 Lazy initialization is single-flight per model and globally load-serialized: at most one attempt for any model runs across the process. Concurrent callers needing that same model join its bounded attempt; a request for a different unloaded model enters a FIFO load queue and remains subject to its own overall deadline. The per-attempt load deadline begins only when that queue entry spawns its worker, never while it is waiting behind another model, and an entry with no live callers is removed without a load or cooldown penalty. Waiting callers remain independently cancellable. A genuine loader failure or attempt-level timeout clears the single-flight state and opens a per-model negative-cache cooldown: 30 seconds after the first failure, doubling after consecutive failures to a 10-minute cap. Calls during cooldown do not trigger a loader; explicit modes fail with `feature_unavailable` and safe detail `reason: model_load_backoff`, while `auto` may use an available model-free path with `retrieval_capability_unavailable`. A successful load resets that model's failure count. Tests use a controllable monotonic clock and a fake supervised worker to cover two joined callers with different overall deadlines, FIFO requests for different models, final-waiter detachment, the load-completion/deadline race, forced worker termination and reaping, late-result rejection, exactly-once caller completion, and per-model cooldown accounting. The configured deadlines, queue/cooldown state, and attempt count are observable without exposing model paths.
+
+The release and process lifecycle is summarized below. Candidate rejection, startup refusal, runtime quarantine, and operator rollback are distinct outcomes; the exact durability and terminal-state rules above remain authoritative:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Building
+    Building --> Candidate: assemble release
+    Candidate --> Rejected: candidate validation fails
+    Candidate --> Sealed: every candidate gate passes
+    Rejected --> [*]: active.json unchanged
+    Sealed --> ActivePointer: atomically replace and flush active.json
+    ActivePointer --> Serving: process start or restart and verification pass
+    ActivePointer --> StartupRefused: startup integrity verification fails
+    Serving --> RuntimeQuarantined: lazy asset integrity verification fails
+    RuntimeQuarantined --> Stopped: close admission, settle pending work, and exit non-zero
+    Serving --> Rollback: operator selects a previous release
+    StartupRefused --> Rollback: operator restores bytes or selects a previous release
+    Stopped --> Rollback: operator restores bytes or selects a previous release
+    Rollback --> ActivePointer: atomic pointer protocol
+```
 
 ---
 
