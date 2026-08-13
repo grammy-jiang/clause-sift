@@ -1171,7 +1171,7 @@ flowchart TB
     subgraph SEMANTIC[Semantic relations]
         direction LR
         CITER[Source-bearing node] -->|references| CITED[Addressable node or document root]
-        DEPENDENT[Requirement, clause, row, or exception] -->|depends_on| DEPENDENCY[Interpretation dependency]
+        DEPENDENT[Requirement, clause, subclause, paragraph, table row, or exception] -->|depends_on| DEPENDENCY[Interpretation dependency]
         EXCEPTION[Exception] -->|exception_to| AFFECTED[Affected source-bearing node]
         DEFINITION[Definition] -->|defines| SCOPE[Governing scope]
         NEWER[Newer document root] -->|supersedes| OLDER[Older document root]
