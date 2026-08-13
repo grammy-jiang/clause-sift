@@ -9,178 +9,308 @@
 
 ## 1. Purpose and precedence
 
-This appendix defines the retry/rotation policy for Phase 2 held-out release gates after any held-out result has been observed.
+This appendix defines leakage-safe retry, split-retirement, reserve/replenishment, and reproduction rules for **all decisive Phase 2 held-out gate families** after any decisive result is observed.
 
-It is deliberately limited to Phase 2 lexical and canonical-classification gates. It does not define Phase 3 embedding/fusion gates or Phase 4 reranking/context/conflict/refusal gates.
+Current Phase 2 gate families include:
 
-Where `phase-2-release-gates.md` says that remediation may produce a newly frozen candidate and proceed to another release-gate evaluation, this appendix is authoritative: **a materially changed candidate may not obtain a new release decision from the same already-observed held-out split.**
+- lexical retrieval;
+- canonical classification;
+- required-context completeness;
+- material-conflict completeness;
+- any end-to-end ordinary Evidence Package gate that consumes independently reviewed decisive labels.
 
-## 2. One decisive use of an unseen held-out split
+It does not govern Phase 3 embedding/fusion selection or Phase 4 high-accuracy reranking/supporting-context gates.
 
-Before the first release-gate evaluation for a candidate family, the project preregisters the held-out rotation policy and exact split identities that may be used.
+Where another Phase 2 document can be read as allowing a materially changed candidate to reuse an already observed decisive split for fresh authorization, this policy is authoritative: **it may not.**
 
-For one frozen candidate, one previously unseen held-out split may be used for the release decision. Once any result from that split is exposed to implementers, maintainers, selection code, or candidate-development workflows, that split becomes **observed**.
+## 2. Core rule
 
-An observed split remains useful for:
+A decisive held-out split may reveal whether one frozen candidate passes. Once revealed, it becomes evidence history, not a reusable optimizer for a materially changed candidate.
 
-- audit and reproduction of the original result;
-- regression history;
-- forensic analysis of failures;
-- verifying that identical candidate bytes reproduce the identical score.
+Observation includes exposure of labels, expected context/conflict sides, raw per-case outputs, aggregate scores sufficient to identify failures, or any other information that could guide remediation.
 
-It is no longer valid as fresh evidence for selecting or approving a materially changed candidate.
+## 3. Campaign roles
 
-## 3. Candidate identity
+Every Phase 2 evaluation case used in a release campaign has exactly one declared role for that campaign:
 
-A candidate identity is the deterministic hash of all Phase 2 behavior-bearing inputs relevant to the gate.
+- `development`;
+- `benchmark_selection`;
+- `screening_nondecisional` where explicitly preregistered;
+- `final_confirmation`;
+- `reproduction_only` after decisive observation.
 
-For lexical gates this includes at minimum:
+A final-confirmation case cannot simultaneously be model/rule selection data.
+
+## 4. Frozen candidate identity
+
+A candidate identity is the deterministic hash of all behavior-bearing inputs relevant to the gate family.
+
+### 4.1 Lexical identity
+
+Include at minimum:
 
 - lexical engine/version;
 - tokenizer/version;
 - field weights;
-- normalization and query-compiler configuration;
+- normalization/query-compiler configuration;
 - lexical index schema/version;
-- canonical chunk/search-text inputs;
-- any other behavior-bearing lexical configuration.
+- canonical chunk/search-text identity;
+- other behavior-bearing lexical configuration.
 
-For classification gates this includes at minimum:
+### 4.2 Classification identity
+
+Include at minimum:
 
 - evidence-vocabulary version/hash;
 - classification schema;
-- deterministic classification rule set/configuration;
-- inheritance rule set/configuration;
-- ordered immutable reviewed classification artefacts;
+- deterministic classification rule/configuration;
+- inheritance rule/configuration;
+- ordered immutable reviewed classification artifacts;
 - canonical-model inputs on which those rules operate.
 
-A change to any behavior-bearing input creates a new candidate for held-out purposes even when the change was motivated by a different dataset.
+### 4.3 Required-context identity
 
-## 4. Identical-candidate replay
+Include every behavior-bearing input that can change required closure, including:
 
-The exact same candidate identity may be rerun on the exact same observed held-out split only for deterministic reproduction/audit.
+- edge identity schema;
+- occurrence identity schema;
+- relationship resolver/configuration where it changes navigability;
+- context rule-set version/configuration;
+- relation-type ordering;
+- context materialization/source-cover version;
+- structural/semantic/object/path/step bounds;
+- evidence vocabulary/classifications consumed by rule eligibility;
+- release graph/catalog identity.
+
+### 4.4 Material-conflict identity
+
+Include at minimum:
+
+- conflict identity schema;
+- detector/rule/configuration identity;
+- context rule/configuration consumed by conflict classification;
+- comparison projection/unit normalization identity;
+- immutable decision/review-policy artifacts;
+- canonical position/source-cover algorithm identity;
+- conflict limits and catalog/release identity.
+
+### 4.5 Evidence Package identity
+
+For a decisive end-to-end Evidence Package gate also bind:
+
+- exact/lexical seed behavior;
+- required-context identity;
+- material-conflict identity;
+- central serializer/schema/configuration;
+- warning/completeness routing behavior;
+- release/build/source identity;
+- interface-neutral shared evidence service identity.
+
+A behavior-bearing change creates a new candidate for every affected decisive gate family even when the change was motivated by another dataset.
+
+## 5. Preregistration
+
+Before any decisive Phase 2 final-confirmation data is observed, record:
+
+- campaign ID;
+- frozen candidate identity hash(es);
+- gate family/families;
+- exact decisive split identity/hash;
+- expected labels/obligations version;
+- review/adjudication policy and artifacts;
+- applicable sample-size/stratification requirements;
+- any allowed nondecisional screening split identities and exact order;
+- corpus/canonical-ID migration versions;
+- rules for candidate replay and campaign closure.
+
+The preregistration artifact is immutable for that campaign.
+
+## 6. One decisive use while unseen
+
+A final-confirmation split may authorize release evidence only on its first decisive evaluation while unseen for the frozen candidate/campaign.
+
+After that evaluation, whether it passes or fails, it becomes `observed_retired` for fresh authorization of a materially changed candidate.
+
+It remains useful for:
+
+- audit;
+- reproduction;
+- regression history;
+- forensic diagnosis;
+- confirming deterministic re-execution of the exact same candidate.
+
+## 7. Identical-candidate replay
+
+The exact same candidate identity may rerun the same observed split only as `reproduction_only`.
 
 Such a replay:
 
-- must be labelled `reproduction_only`;
-- must not create a new independent release-gate decision;
-- must reproduce the original raw outputs and gate result under the declared deterministic contract, or else expose a reproducibility failure;
-- cannot turn an original failure into a pass through repeated attempts, random seeds, environment changes, or selective reporting.
+- cannot create a second independent pass;
+- cannot erase/reset an original failure;
+- cannot authorize a changed candidate;
+- must remain linked to the original decisive event;
+- must reproduce the original result under deterministic contracts or expose a reproducibility failure.
 
-If the implementation is intentionally nondeterministic in a way the design permits, the preregistered gate procedure must define the complete repeated-sampling protocol **before** the first held-out observation. Phase 2 must not invent repeated trials after seeing a failure.
+No repeated attempts, random seeds, environment changes, or selective reporting may convert a failed decisive event into a pass unless a preregistered nondeterministic protocol was explicitly admitted before first observation.
 
-## 5. Materially changed candidate after a held-out failure
+## 8. Changed candidate after decisive observation
 
-When a held-out gate fails:
+A changed candidate cannot use the observed split for fresh pass/fail authorization.
 
-1. activation is blocked;
-2. the failed split is marked observed/retired for new-candidate release decisions;
-3. remediation returns to development and benchmark/model-selection evidence;
-4. a new candidate is frozen without consulting hidden labels from any unused reserve split;
-5. the next release decision uses the next preregistered unused reserve split, or a newly replenished independently labelled blinded split that satisfies all Phase 0 sample-size and stratification requirements;
-6. the rotation/replenishment event and split versions are recorded before the new candidate is evaluated.
+This includes changes to lexical configuration, classification rules, required-context behavior, conflict rules/decisions/covers, serializer behavior, or any upstream source/catalog/release input that changes the applicable expected result.
 
-The failed held-out result may inform high-level diagnosis, but it cannot become an oracle for repeatedly choosing candidates until one passes the same cases.
+After a failure:
 
-## 6. Reserve-split preregistration
+1. activation remains blocked;
+2. the result is retained permanently;
+3. remediation returns to development/benchmark/review evidence;
+4. a new candidate is frozen without consulting hidden labels from a fresh decisive split;
+5. a new campaign or the next valid preregistered path obtains genuinely fresh decisive evidence;
+6. the new split and candidate are preregistered before observation.
 
-If the project expects more than one candidate attempt, it must preregister a deterministic reserve policy before the first held-out result is seen.
+## 9. Finite campaign and no stop-on-pass sequence
 
-A valid policy records:
+Phase 2 must not permit an unlimited sequence of decisive reserve splits until one passes.
 
-- ordered reserve split identifiers or a deterministic blinded allocation procedure;
-- the gate families each reserve split covers;
-- minimum applicable sample counts;
-- required strata;
+A release campaign has one final decisive confirmation event for each jointly exposed decisive split family unless the preregistered statistical procedure explicitly defines a different finite joint test before observation.
+
+Failure closes that campaign for the failed candidate.
+
+Any screening reserves are nondecisional, finite, preregistered, and cannot authorize activation.
+
+A materially changed candidate after final failure requires a fresh campaign and fresh decisive evidence.
+
+## 10. Reserve-split preregistration
+
+If nondecisional reserves/screening sets are used, preregister:
+
+- exact identities/order or deterministic blinded allocation procedure;
+- gate families supported;
+- purpose (`screening_nondecisional` only unless explicitly a later fresh campaign);
+- minimum applicable samples/strata;
 - who controls label visibility;
-- when a reserve split becomes observed/retired;
-- how replenishment obtains independent labels;
-- how overlap with development, benchmark, previous held-out, and calibration data is rejected.
+- retirement semantics;
+- overlap rejection;
+- replenishment process.
 
-The implementation may not inspect several reserve splits and choose the one on which a candidate performs best.
+Implementers cannot inspect several unseen splits and choose the most favorable one.
 
-## 7. Replenished held-out data
+## 11. Fresh later campaign
 
-A replenished held-out split must satisfy the same ground-truth and review requirements as the original Phase 0 release-gate data, including:
+A later campaign after decisive failure must use genuinely fresh independently reviewed decisive evidence satisfying Phase 0 governance.
+
+Requirements include:
 
 - independently sourced/labelled applicable cases;
-- applicable two-reviewer/adjudication methodology;
-- required calibration/reliability rules;
-- no forbidden overlap with development/benchmark or previously observed held-out cases;
-- required per-gate sample sizes and stratification;
+- required two-reviewer/adjudication methodology where Phase 0 specifies it;
+- no forbidden overlap with development/benchmark/previously observed decisive cases;
+- required samples/strata;
 - versioned split and label identities;
-- Phase 2 canonical-ID migration completed and reviewed before scoring.
+- reviewed canonical-ID migration before scoring where applicable;
+- preregistration before observation.
 
-Replenishment is not achieved by paraphrasing an already observed query, trivially changing punctuation, or duplicating the same source case while preserving the answer.
+Paraphrasing an observed query, punctuation changes, or duplicating the same underlying source case does not create fresh decisive evidence.
 
-## 8. Gate-family isolation
+## 12. Gate-family exposure semantics
 
-Observation status is tracked at the case/split level and cannot be hidden by renaming the metric.
+Observation is tracked at the case/split evidence level, not hidden by renaming metrics.
 
-The five Phase 2 probabilistic gate families are:
+The Phase 2 decisive families include:
 
 1. lexical Recall@20;
-2. lexical Top-5 evidence presence;
+2. lexical Top-5;
 3. `node_type` accuracy;
 4. `normative_status` accuracy;
-5. `source_modality` accuracy.
+5. `source_modality` accuracy;
+6. required-context completeness;
+7. material-conflict completeness;
+8. end-to-end Evidence Package correctness where separately labelled.
 
-A case whose expected evidence/classification has been exposed through one gate cannot be treated as unseen for another candidate merely because a different metric is being reported from the same label.
+Where one split exposes labels used by several families, the preregistered policy defines their joint retirement before evaluation.
 
-Where one split legitimately supports several gate families, the preregistered policy must define their joint exposure/retirement semantics before evaluation.
+For context/conflict gates, observing expected required targets, expected conflict sides, or per-case omission diagnostics counts as observation even if no scalar metric is reported.
 
-## 9. Release-gate ledger
+## 13. Release-gate ledger
 
-Every decisive held-out run records:
+Every decisive run records at minimum:
 
+- campaign ID;
 - candidate identity;
 - gate family;
-- split version;
-- canonical-ID migration artefact hash;
+- split identity/version/hash;
+- split role;
+- reviewed canonical-ID migration artifact where applicable;
 - raw-result hash;
 - sample counts;
-- Wilson result where applicable;
-- decision (`pass` or `fail`);
-- whether the split was previously unseen at decision time;
-- resulting split state (`observed_retired`);
-- next eligible reserve policy reference.
+- Wilson result for probabilistic gates;
+- zero-omission counts/details for context/conflict gates;
+- pass/fail;
+- whether split was unseen at decision time;
+- resulting split state;
+- predecessor/successor campaign linkage.
 
-A release validator rejects a purported decisive gate result when:
+Release validation rejects a purported decisive result when:
 
-- the candidate identity does not match the evaluated bytes/configuration;
-- the split had already been observed by a different candidate;
-- the split was eligible only for reproduction;
-- reserve order was bypassed;
-- split overlap/leakage is detected;
-- the canonical-ID migration was not reviewed before scoring.
+- candidate identity does not match evaluated behavior;
+- split was already observed by a different candidate;
+- split is reproduction-only/nondecisional;
+- reserve/campaign order is invalid;
+- overlap/leakage is detected;
+- required independent review/migration evidence is missing;
+- a final-failure campaign is reused for another decisive attempt.
 
-## 10. Tests
+## 14. Context/conflict-specific anti-leakage rules
 
-Phase 2 must test at minimum:
+Do not tune required traversal or conflict behavior against a decisive omission list.
 
-- first frozen candidate + unseen split -> decisive run allowed;
-- identical candidate + same observed split -> reproduction-only allowed, no new decision;
-- changed lexical candidate + same observed split -> decisive run rejected;
-- changed classification rule set + same observed split -> decisive run rejected;
-- changed candidate + next preregistered unseen reserve -> decisive run allowed;
-- changed candidate + reserve chosen out of preregistered order -> rejected;
+After decisive context/conflict failure, implementers may retain high-level failure history, but the exact observed expected-target/position labels cannot become the training/selection set for repeated candidate attempts while still being called held out.
+
+Changes such as:
+
+- adding a required edge rule;
+- changing endpoint eligibility;
+- changing context source-cover ordering;
+- changing conflict detection/explanation;
+- altering canonical position cover;
+- changing serializer omission behavior;
+
+create a changed candidate and require fresh decisive evidence for affected families.
+
+## 15. Tests
+
+Test at minimum:
+
+- first frozen candidate + unseen decisive split -> allowed;
+- identical candidate + same observed split -> reproduction-only, no new decision;
+- changed lexical candidate + same observed split -> rejected;
+- changed classification rules + same observed split -> rejected;
+- changed context rule only + same observed context split -> rejected;
+- changed conflict rule/decision/cover only + same observed conflict split -> rejected;
+- changed serializer that affects context/conflict projection + same observed end-to-end split -> rejected;
+- fresh later campaign + genuinely new reviewed split -> allowed;
+- out-of-order/cherry-picked reserve -> rejected;
 - replenished split with overlap -> rejected;
-- replenished split below required sample size -> rejected;
-- replenished split without required independent review -> rejected;
-- multiple reserve results inspected before candidate choice -> rejected;
+- replenished split below sample/stratum requirement -> rejected;
+- missing independent review -> rejected;
+- multiple unseen reserve results inspected before candidate choice -> rejected;
+- final failure closes campaign;
 - failed gate leaves active release unchanged;
-- retry uses a reviewed canonical-ID migration for the new held-out split.
+- reproduction mismatch exposes reproducibility failure;
+- ledger tampering/inconsistent observed state blocks release.
 
-## 11. Acceptance criteria
+## 16. Acceptance criteria
 
 Phase 2 is not complete unless:
 
-1. the held-out retry/rotation policy is preregistered before first decisive evaluation;
-2. every decisive candidate uses an unseen eligible held-out split;
-3. an observed split cannot produce a fresh decision for a materially changed candidate;
-4. identical-candidate replay is clearly non-decisional and used only for reproducibility;
-5. reserve/replenished splits preserve Phase 0 independence, review, sample-size, and stratification rules;
-6. reserve order cannot be cherry-picked after observing results;
-7. every decisive result is bound to candidate identity, split identity, and reviewed canonical-ID migration;
-8. a failure blocks activation and does not permit repeated optimization against the same held-out cases.
+1. retry/retirement governance covers every decisive Phase 2 gate family now owned by current design;
+2. preregistration occurs before decisive observation;
+3. every decisive changed candidate uses genuinely unseen eligible evidence;
+4. observed evidence cannot authorize a materially changed candidate;
+5. identical-candidate replay is reproduction-only;
+6. campaign/reserve use is finite and cannot become stop-on-pass cherry-picking;
+7. later campaigns use fresh independently reviewed evidence;
+8. every decisive result is bound to candidate/split/campaign identity and applicable review/migration evidence;
+9. context/conflict expected-label exposure is treated as observation even without a scalar score;
+10. any gate failure blocks activation and preserves the prior active release.
 
-The core rule is simple: **a held-out release gate may reveal whether one frozen candidate passes; once revealed, it is evidence history, not a reusable optimizer for the next candidate.**
+The operational rule remains simple: **once decisive evidence has been revealed, it is history for that candidate family, not a reusable optimizer for the next candidate.**
