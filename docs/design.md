@@ -969,8 +969,8 @@ The following success-path overview is a reading aid; the mode and traversal con
 ```mermaid
 flowchart TD
     REQ[search_evidence request] --> VALID[Validate schema, bounds, and filters]
-    VALID --> ANALYSE[Analyse query and resolve auto mode]
-    ANALYSE --> MODE{Resolved mode}
+    VALID --> ANALYZE[Analyze query and resolve auto mode]
+    ANALYZE --> MODE{Resolved mode}
     MODE -->|exact| EXACT[Metadata, exact, and lexical retrieval]
     MODE -->|hybrid| HYBRID[Lexical and dense retrieval plus fusion]
     MODE -->|high_accuracy| HIGH[Exact, lexical, and dense retrieval plus fusion]
@@ -979,7 +979,7 @@ flowchart TD
     HYBRID --> SEEDS
     RERANK --> SEEDS
     SEEDS --> REQUIRED[Required graph and material-conflict fixed point]
-    REQUIRED --> SUPPORT{High accuracy?}
+    REQUIRED --> SUPPORT{Resolved mode is high_accuracy?}
     SUPPORT -->|yes| OPTIONAL[Supporting context traversal]
     SUPPORT -->|no| SERIALIZE[Attach lineage and typed warnings]
     OPTIONAL --> SERIALIZE
@@ -1997,7 +1997,7 @@ flowchart TD
     TOOL -->|no| TOOL_ERROR[isError true with one typed error text and no structuredContent]
     SURFACE -->|resources/read| URI{Canonical resource URI?}
     URI -->|malformed| INVALID_URI[JSON-RPC -32602 with no contents]
-    URI -->|well formed but unknown| UNKNOWN_URI[2026 path: -32602; 2025 session: -32002]
+    URI -->|well-formed but unknown| UNKNOWN_URI[2026 path: -32602; 2025 session: -32002]
     URI -->|known| RESOURCE_ADMIT{Work admitted and response budget reserved?}
     RESOURCE_ADMIT -->|no| BUSY
     RESOURCE_ADMIT -->|yes| RESOURCE{Integrity and required closure succeed?}
