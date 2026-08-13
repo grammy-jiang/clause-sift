@@ -5,171 +5,159 @@
 - **Detailed realization:** [ClauseSift Design Document](design.md)
 - **Design rules:** [ClauseSift Design Principles](design-principles.md)
 
-## 1. Role
+## 1. Purpose
 
-This brief defines ClauseSift's product intent: its purpose, users, boundaries,
-major components, major workflow, and first usable release. It deliberately does
-not define schemas, algorithms, protocols, thresholds, failure routing, or test
-matrices; those belong in the detailed design.
-
-The three documents have distinct authority:
-
-- this brief owns product intent;
-- the design principles own durable decision rules;
-- the detailed design owns the technical realization of both.
-
-They must remain consistent. A change to product intent starts here; a change to
-a design rule starts in the principles; all resulting technical changes are made
-in the detailed design.
-
-## 2. Product intent
-
-ClauseSift is an accuracy-first, local evidence-retrieval engine for engineering
+ClauseSift is a local, accuracy-first evidence-retrieval engine for engineering
 standards, codes, design guidelines, technical manuals, and product
-specifications.
+specifications. Its initial user is a single technical practitioner working with
+a relatively small, slowly changing local corpus, initially focused on HVAC,
+ventilation, smoke-control, fire-safety, and manufacturer documentation.
 
-It compiles a lawfully held document corpus into a verified, immutable knowledge
-base and returns an **Evidence Package**: source-backed text, identity and edition,
-applicability context, citations, conflicts, warnings, and a path to the original
-page.
+Its defining output is not a generated answer. It is a defensible **Evidence
+Package** containing the correct source, edition, clause, original text,
+applicability context, page citation, provenance, visible uncertainty, and a path
+back to the original page. An AI client may interpret that package, but the source
+documents remain authoritative.
 
-ClauseSift retrieves and organizes evidence. It does not approve designs, make
-engineering or legal decisions, or replace professional judgment.
+This brief defines the product intent and boundary. The detailed design defines
+the implementation contracts, and the design principles define the rules used to
+make or revise those contracts.
 
-## 3. Users and boundaries
+## 2. Problem and boundary
 
-The initial user is a single technical practitioner working with HVAC,
-ventilation, smoke-control, fire-safety, and manufacturer documentation. The
-user may work through Python, a command-line interface, or an MCP-compatible AI
-client.
+Engineering evidence is structurally demanding. Clause identifiers and editions
+must remain distinct; source requirements and prohibitions must not be confused
+with recommendations, notes, or informative material; requirements need their
+parent scope and exceptions; tables need headers, units, and row context; and
+every citation must lead back to the original page. The system must also work for
+exact identifiers, technical terms, numbers, and natural-language questions while
+reporting insufficient or conflicting evidence explicitly.
 
-The initial product assumes a local, relatively small, slowly changing corpus
-that may include born-digital PDFs, scans, complex tables, and multiple editions.
-The user supplies the documents and reviewed metadata and remains responsible
-for lawful access and professional interpretation.
+ClauseSift therefore treats the corpus as versioned engineering evidence, not as
+unstructured text for a PDF-chat application.
 
-In scope:
+The first major version does not provide a general chat interface, multi-user
+access, enterprise connectors, live document synchronization, collaborative
+annotation, agent orchestration, a universal knowledge graph, engineering
+calculations, design approval, or legal determinations. It also does not
+redistribute proprietary source documents. It retrieves and organizes evidence;
+it does not replace professional engineering judgement or statutory review.
 
-- exact clause and document lookup;
-- lexical retrieval with metadata filters;
-- optional semantic retrieval and reranking when validated;
-- deterministic inclusion of required context and material conflicts;
-- original-page inspection and complete evidence lineage;
-- offline rebuilding, validation, activation, and rollback.
+## 3. Product outcomes
 
-Out of scope:
+ClauseSift will:
 
-- general-purpose chat or agent orchestration;
-- multi-user collaboration or enterprise document management;
-- online document synchronization;
-- engineering calculations, autonomous approval, or legal determination;
-- redistribution of copyrighted source documents.
+- ingest local standards, codes, guidelines, manuals, and specifications under
+  human-reviewed manifests;
+- preserve document identity, edition, status, structure, verified source hash,
+  page location, and deterministic lineage;
+- support exact clause lookup, lexical search, semantic retrieval, metadata
+  filtering, fusion, and high-accuracy reranking;
+- attach the scope, applicability, definitions, exceptions, notes, tables,
+  cross-references, and material conflict positions needed to interpret a hit;
+- publish validated, immutable knowledge-base releases that can be activated
+  atomically, reproduced, and rolled back; and
+- expose one shared read-only runtime through Python, CLI, and MCP without
+  requiring external database or search services.
 
-## 4. Major components
+## 4. System context
 
 ```mermaid
 flowchart LR
-    SOURCES[Approved sources and manifests]
-    COMPILER[Offline compiler]
-    MODEL[Canonical Evidence Graph and catalog]
-    ARTIFACTS[Retrieval and lineage artifacts]
-    RELEASE[Verified immutable release]
-    RUNTIME[Read-only retrieval runtime]
-    INTERFACES[Python, CLI, and MCP]
-    PACKAGE[Evidence Package]
-    EVAL[Evaluation and release gates]
-
-    SOURCES --> COMPILER
-    COMPILER --> MODEL
-    COMPILER --> ARTIFACTS
-    MODEL --> RELEASE
-    ARTIFACTS --> RELEASE
-    EVAL --> COMPILER
-    RELEASE --> RUNTIME
-    INTERFACES --> RUNTIME
-    RUNTIME --> PACKAGE
+    U[Engineer] --> C[Claude Desktop / Claude Code]
+    C <-->|MCP stdio| R[ClauseSift Runtime]
+    R --> K[Compiled KB Release: Evidence Graph and indexes]
+    B[ClauseSift Builder] --> K
+    S[Local source documents] --> B
+    M[Human-maintained manifests] --> B
+    E[Evaluation corpus] --> B
 ```
+
+The AI client is separate from ClauseSift. MCP is an adapter to the same runtime
+used by the Python and CLI interfaces; it is not a second retrieval system.
+
+## 5. Major components
 
 | Component | Responsibility |
 | --- | --- |
-| Sources and manifests | Preserve approved document bytes and reviewed identity, edition, status, and applicability metadata. |
-| Offline compiler | Parse, normalize, relate, evaluate, and package the corpus. |
-| Evidence Graph and catalog | Hold the canonical structure, identities, provenance, and reviewed relationships. |
-| Retrieval and lineage artifacts | Accelerate search and explain how evidence was produced. |
-| Immutable release | Bind verified catalog and artifacts into one reproducible serving unit. |
-| Read-only runtime | Search one active release, close required context, and assemble results without mutation. |
-| Interfaces and Evidence Package | Expose one evidence contract through Python, CLI, and MCP. |
-| Evaluation and release gates | Prevent unverified parser, retrieval, context, or release changes from activation. |
+| **Governed inputs** | Local source files, human-reviewed manifests, and a versioned evaluation corpus establish reviewed document identity, applicability, and expected evidence. |
+| **Offline builder** | Routes parsers and OCR, creates the canonical document model, resolves structure and references, constructs retrieval units, builds indexes, evaluates quality, and assembles a candidate release. |
+| **Canonical Evidence Graph** | Represents source-grounded document nodes and typed structural or semantic relationships. It is a logical model stored in SQLite for v0.1, not a separate graph service. |
+| **Immutable release** | Packages the validated catalog, lineage, reports, and the retrieval artifacts enabled for that release under checksums and one release identity. |
+| **Read-only runtime** | Analyses queries, searches the active release, fuses and reranks candidates, expands required context and conflicts, and serializes an Evidence Package. |
 
-## 5. Major workflow
+All build and retrieval components meet at one canonical evidence model and one
+public evidence interface.
+
+## 6. End-to-end workflow
 
 ```mermaid
-flowchart TD
-    REGISTER[Approve sources and manifests]
-    BUILD[Parse and build canonical evidence]
-    INDEX[Build retrieval and lineage artifacts]
-    GATE{Validation and quality gates pass?}
-    CANDIDATE[Assemble candidate release]
-    VERIFY{Runtime verification passes?}
-    ACTIVE[Atomically activate release]
-    QUERY[Validated user request]
-    SEARCH[Exact, lexical, and available semantic search]
-    CONTEXT[Close required context and conflicts]
-    RESULT[Return Evidence Package]
-    PAGE[Inspect verified original page]
-    REJECT[Reject candidate; keep active release]
-
-    REGISTER --> BUILD --> INDEX --> GATE
-    GATE -->|no| REJECT
-    GATE -->|yes| CANDIDATE --> VERIFY
-    VERIFY -->|no| REJECT
-    VERIFY -->|yes| ACTIVE
-    ACTIVE --> QUERY --> SEARCH --> CONTEXT --> RESULT --> PAGE
+flowchart TB
+    S[Govern sources and manifests] --> B[Compile Evidence Graph and indexes]
+    B --> V{Evaluation and quality gates pass?}
+    V -->|No| R[Reject candidate; keep active release]
+    V -->|Yes| C[Assemble and verify candidate release]
+    C -->|Fails| R
+    C -->|Passes| A[Atomically activate immutable release]
+    A --> Q[Retrieve evidence and expand required context]
+    Q --> E[Return Evidence Package]
 ```
 
-Build work occurs offline. A failed or partial candidate never replaces the
-active release. Successful candidates are verified before atomic activation,
-and an earlier valid release remains available for recovery.
+During a build, ClauseSift validates source identity, parses each document into a
+canonical structure, preserves page provenance, creates
+standards-aware chunks and relationships, builds retrieval artifacts, runs the
+golden evaluation corpus, and publishes only a passing candidate release.
 
-At query time, the runtime validates the request, retrieves evidence through the
-available channels, adds all required interpretive context and material conflict
-sides, and returns one Evidence Package. Faster retrieval modes may change how
-candidates are found, but not the evidence meaning or required context.
+During a query, the runtime analyses the question and filters, searches the
+prebuilt channels, combines and reranks candidates, deterministically adds
+required context and all material conflict sides, and returns structured evidence.
+The runtime never mutates the active release.
 
-## 6. First usable release
+## 7. Evidence Package
 
-The first usable release completes the dependable exact-and-lexical path before
-semantic retrieval is required. It must:
+Every successful retrieval returns a bounded package that makes four things clear:
 
-- install as a Python package and initialize a local workspace;
-- ingest selected PDFs through approved manifests and verified source hashes;
-- preserve document, edition, clause, page, classification, and source identity;
-- build and verify an immutable release with evidence lineage;
-- support exact clause lookup and lexical search with metadata filters;
-- attach required context and every material conflict side under bounded rules;
-- return original evidence, deterministic citations, and explicit insufficiency
-  or typed failure when safe evidence cannot be returned;
-- expose consistent retrieval behavior through Python, CLI, and MCP;
-- support candidate validation, atomic activation, and rollback.
+- **what was found:** original source-backed text and its evidence role;
+- **where it came from:** document, edition, clause, page, and available page
+  coordinates;
+- **what is needed to interpret it:** scope, applicability, dependencies,
+  definitions, exceptions, table context, references, and conflict positions; and
+- **how it was produced:** release identity, source/build lineage, retrieval and
+  expansion reasons, plus typed warnings for incomplete or uncertain evidence.
 
-Semantic retrieval, reranking, broader document families, and version or product
-intelligence follow only after this baseline is reliable.
+Empty evidence is a valid, explicit outcome. Missing context, unresolved
+references, parser uncertainty, and conflicts are never repaired or hidden by the
+AI client.
 
-## 7. Success
+## 8. First release and evolution
 
-ClauseSift succeeds when a practitioner can retrieve evidence faster while
-retaining the source fidelity, context, uncertainty, and traceability needed for
-professional review.
+The first usable release focuses on a small representative corpus and provides:
 
-Release acceptance is defined quantitatively in the detailed design. At the
-product level, success means:
+- Python packaging and a local workspace;
+- approved manifests, source-hash validation, canonical structure, and a SQLite
+  catalog;
+- exact clause lookup and lexical search with metadata filters;
+- deterministic citations, required-context expansion, and material-conflict
+  closure;
+- Python, CLI, and MCP access to the same evidence behavior;
+- static review reports, immutable release activation, validation, and rollback;
+  and
+- regression gates based on real questions and expected evidence.
 
-- answerable requests return the correct source-backed evidence and context;
-- insufficient or unsafe requests fail visibly rather than producing plausible
-  unsupported material;
-- editions, evidence roles, and conflicts are never silently collapsed;
-- released knowledge bases are reproducible, verifiable, and recoverable;
-- Python, CLI, and MCP present the same evidence semantics.
+Hybrid semantic retrieval and reranking follow once exact retrieval is sound.
+Later work may add edition comparison, clause mapping, structured product
+parameters, and standards-to-product comparison. Parser, OCR, model, index, and
+platform choices remain benchmark-driven; licensing and support choices require
+explicit governance decisions.
 
-The detailed design is the authoritative source for implementation contracts,
-evaluation methods, and acceptance thresholds.
+## 9. Success
+
+ClauseSift succeeds when an engineer can ask a realistic question and receive the
+right source, edition, clause, page, original text, and complete interpretive
+context—with conflicts or insufficiency made visible—through a fast local runtime.
+The same inputs must produce the same validated release and evidence behavior, and
+an operator must be able to inspect, activate, and roll back releases safely.
+
+The detailed design owns the measurable release gates for retrieval quality,
+citation accuracy, context completeness, reproducibility, compatibility,
+security, and performance.
