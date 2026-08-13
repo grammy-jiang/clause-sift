@@ -630,6 +630,8 @@ Each reviewer must record:
 - rubric version;
 - timestamp in the review record where operational history requires it, without using wall-clock data as deterministic corpus identity.
 
+The same two reviewers whose agreement is measured on the release sample must also independently grade the complete blinded calibration set for that release cycle. Calibration results from a different reviewer pair cannot satisfy the release-sample reliability gate.
+
 ### 16.3 Subsequent release cycles
 
 After the first release, the second reviewer covers:
@@ -638,6 +640,8 @@ After the first release, the second reviewer covers:
 - every gate failure;
 - every item marked uncertain by the primary reviewer;
 - the full blinded calibration set.
+
+The primary reviewer for that release cycle also grades the full blinded calibration set, so the calibration agreement is always computed for the same two reviewers whose release-sample agreement is being assessed.
 
 ### 16.4 Calibration set
 
@@ -653,12 +657,12 @@ Report agreement before adjudication.
 - Ordinal labels use the rubric's preregistered fixed weight matrix.
 - A computable coefficient must be at least 0.80 on the release sample and calibration set.
 - If the release sample is degenerate because both reviewers assign every item to the same category, report kappa as `not_estimable`.
-- The degenerate release sample passes reliability only with exactly 100% raw agreement and a computable calibration kappa of at least 0.80 using at least two observed categories.
+- The degenerate release sample passes reliability only with exactly 100% raw agreement and a computable calibration kappa of at least 0.80, produced by the same two reviewers who labelled that release sample and using at least two observed categories.
 - A degenerate calibration result blocks the gate.
 - Any release-sample disagreement in the degenerate fallback case blocks the gate.
 - Disagreements are adjudicated by a third reviewer.
 
-The evaluation tooling must retain raw labels, category counts, agreement, coefficient computability, adjudication, and final labels.
+The evaluation tooling must retain raw labels, category counts, agreement, coefficient computability, reviewer-pair identity, adjudication, and final labels.
 
 ## 17. Work package 0.13: Statistical expansion plan
 
@@ -674,7 +678,7 @@ Do not combine them into one headline accuracy percentage.
 
 ### 17.2 98% probabilistic gates
 
-For every 98% gate, create an independently labelled applicable sample of at least 150 cases.
+For every 98% gate, create an independently labelled applicable sample of at least 150 cases **for each separately reported gate family**. Counts cannot be pooled across independently gated fields, states, or explanation-code families merely to reach 150.
 
 This minimum applies independently to applicable metric families such as:
 
@@ -682,10 +686,13 @@ This minimum applies independently to applicable metric families such as:
 - node-type accuracy;
 - normative-status accuracy;
 - source-modality accuracy;
-- confirmed/unresolved conflict precision where that gate is evaluated;
-- explained-difference precision where that gate is evaluated.
+- confirmed-conflict precision when `confirmed` is reported;
+- unresolved-conflict precision when `unresolved` is reported;
+- each reported explained-difference explanation-code family.
 
-If a metric family has subclasses that would be critically underrepresented, increase the sample rather than relying on the bare minimum.
+For conflict precision, every reported state or explanation-code family therefore has its own numerator, denominator, Wilson lower bound, and at least 150 independently labelled applicable cases. A 150-case aggregate containing only a handful of one state or code family is insufficient for that family's 98% gate.
+
+If any metric family has subclasses that would be critically underrepresented even after satisfying its own minimum, increase the sample rather than relying on the bare minimum.
 
 ### 17.3 95% probabilistic gates
 
@@ -808,7 +815,12 @@ Define a simple evaluation-result input contract that later phases can populate 
 - warnings;
 - conflict records;
 - citations;
+- observed answerability/refusal disposition, including whether the system answered, refused, returned insufficient evidence, or reported ambiguity/invalid input as applicable;
+- generated claim records for answer-producing clients, with stable claim IDs and claim-to-evidence links sufficient for blinded claim-level support grading;
+- claim-level grader labels/provenance when human evidence-support or unsupported-assertion evaluation has been performed;
 - latency metadata where relevant.
+
+The contract must support the design-owned evaluators without forcing later phases to invent incompatible result extensions. In particular, it must be sufficient to derive the refusal confusion matrix and to retain the claim/evidence observations used for evidence-support and unsupported-assertion rates. Generated prose is not itself ground truth, and claim-level human labels remain separate reviewed evaluation records.
 
 Do not implement fake runtime output merely to complete Phase 0. The purpose is to prevent every later phase from inventing a different evaluator interface.
 
@@ -890,6 +902,7 @@ Includes:
 Includes:
 
 - reviewer coverage;
+- reviewer-pair identity for release/calibration agreement;
 - uncertain-item count;
 - disagreements;
 - raw agreement;
@@ -901,7 +914,7 @@ Includes:
 
 For each Section 29.4 probabilistic gate, report:
 
-- current applicable sample count;
+- current applicable sample count, separately for every independently gated field/state/code family;
 - required minimum count;
 - identified missing strata;
 - whether the corpus is exploratory, benchmark-ready, or release-gate-ready.
@@ -972,13 +985,14 @@ Phase 0 implementation is accepted only when all of the following are true.
 7. Wrong-edition, prohibited-edge, unsupported-inference, and other hard-negative fixtures are represented explicitly.
 8. Context/traversal and conflict cases are defined in a form that can later migrate to exact canonical IDs and edge paths.
 9. Evaluation schemas are versioned and closed enough to detect malformed or ambiguous records.
-10. Reviewer, calibration, agreement, and adjudication procedures implement the design's rules.
+10. Reviewer, calibration, agreement, and adjudication procedures implement the design's rules, including same-reviewer-pair calibration.
 11. Statistical tooling correctly implements one-sided 95% Wilson lower bounds and reports numerator/denominator.
-12. The release-gate expansion plan identifies the minimum 150-case and 60-case requirements for the applicable probabilistic metrics and documents stratification.
+12. The release-gate expansion plan identifies the minimum 150-case and 60-case requirements for the applicable probabilistic metrics, keeps every independently reported conflict state/code family separate, and documents stratification.
 13. Development, benchmark, held-out, and calibration splits have explicit leakage rules.
-14. Corpus validation tests pass.
-15. Markdown and repository documentation checks pass in CI.
-16. A Phase 0 readiness report lists any remaining coverage gaps and does not claim release-gate readiness unless the sample requirements have actually been met.
+14. The evaluator result contract can carry observed refusal/answerability outcomes and claim-to-evidence records needed by the design's end-to-end metrics.
+15. Corpus validation tests pass.
+16. Markdown and repository documentation checks pass in CI.
+17. A Phase 0 readiness report lists any remaining coverage gaps and does not claim release-gate readiness unless the sample requirements have actually been met.
 
 ## 26. Explicit non-goals
 
