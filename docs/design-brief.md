@@ -53,7 +53,7 @@ ClauseSift will:
   human-reviewed manifests;
 - preserve document identity, edition, status, structure, verified source hash,
   page location, and deterministic lineage;
-- support exact clause lookup, lexical search, semantic retrieval, metadata
+- support exact clause lookup, lexical search, later semantic search, metadata
   filtering, fusion, and high-accuracy reranking;
 - attach the scope, applicability, definitions, exceptions, notes, tables,
   cross-references, and material conflict positions needed to interpret a hit;
@@ -110,7 +110,7 @@ canonical structure, preserves page provenance, creates
 standards-aware chunks and relationships, builds retrieval artifacts, runs the
 golden evaluation corpus, and publishes only a passing candidate release.
 
-During a query, the runtime analyses the question and filters, searches the
+During a query, the runtime analyses the user's request, searches the
 prebuilt channels, combines and reranks candidates, deterministically adds
 required context and all material conflict sides, and returns structured evidence.
 The runtime never mutates the active release.
