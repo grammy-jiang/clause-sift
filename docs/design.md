@@ -1095,17 +1095,21 @@ This diagram summarizes the required-first control flow; the queue tuple, materi
 
 ```mermaid
 flowchart TD
-    SEED[Ordered member nodes from ranked sources] --> QUEUE[Required priority queue]
-    QUEUE -->|dequeue next path state| CHECK{Path state admissible?}
-    CHECK -->|path-local cycle| CYCLE[Record warning and drop repeated step]
+    SEED[Ordered member nodes from ranked sources] --> CANDIDATE[Generate a required path-state candidate]
+    CANDIDATE --> CYCLE_CHECK{Would it repeat a path-local node?}
+    CYCLE_CHECK -->|yes| CYCLE[Record warning and discard the candidate]
     CYCLE --> QUEUE
-    CHECK -->|required bound exceeded| FAIL[Return context_limit_exceeded with no partial package]
-    CHECK -->|yes| MATERIALIZE[Materialize a source cover or metadata-only target]
-    MATERIALIZE --> RETAIN[Retain the independent path and enqueue eligible required rules]
-    RETAIN --> QUEUE
-    QUEUE -->|required queue drained| CONFLICT{Material-conflict closure adds a source or record?}
-    CONFLICT -->|yes| QUEUE
-    CONFLICT -->|no| OPTIONAL{Supporting or diagnostic context requested?}
+    CYCLE_CHECK -->|no| BOUND_CHECK{Candidate fits every required enqueue bound?}
+    BOUND_CHECK -->|no| FAIL[Return context_limit_exceeded with no partial package]
+    BOUND_CHECK -->|yes| QUEUE[Required priority queue]
+    QUEUE -->|dequeue next path state| MATERIALIZE[Materialize a source cover or metadata-only target]
+    MATERIALIZE --> RETAIN[Retain the independent path and generate eligible required candidates]
+    RETAIN --> CANDIDATE
+    QUEUE -->|required queue drained| CONFLICT{Material-conflict closure step}
+    CONFLICT -->|new cover source| CANDIDATE
+    CONFLICT -->|record only| QUEUE
+    CONFLICT -->|required conflict bound exceeded| FAIL
+    CONFLICT -->|fixed point reached| OPTIONAL{Supporting or diagnostic context requested?}
     OPTIONAL -->|yes| OPTIONAL_RUN[Traverse optional entries in deterministic order]
     OPTIONAL -->|no| FINALIZE[Deduplicate objects, preserve paths, and order output]
     OPTIONAL_RUN -->|complete| FINALIZE
@@ -1983,11 +1987,14 @@ The principal routing surfaces are summarized below. It intentionally omits per-
 
 ```mermaid
 flowchart TD
-    FRAME[Inbound stdio frame] --> ENVELOPE{Bounded, valid JSON-RPC and MCP request?}
+    FRAME[Inbound stdio frame] --> ENVELOPE{Bounded, valid JSON-RPC and MCP message?}
     ENVELOPE -->|no| PROTOCOL[Protocol-level JSON-RPC error; no application handler]
-    ENVELOPE -->|yes| CONTROL{Cancellation notification?}
-    CONTROL -->|yes| CANCEL[Race the atomic terminal state; publish no cancellation response]
-    CONTROL -->|no| SURFACE{Request surface}
+    ENVELOPE -->|yes| MESSAGE{MCP message kind}
+    MESSAGE -->|cancellation notification| CANCEL[Race the atomic terminal state; publish no cancellation response]
+    MESSAGE -->|other protocol message| PROTOCOL_CONTROL[Handle at the protocol layer; no application work]
+    MESSAGE -->|work request| REQUEST{Valid MCP request shape?}
+    REQUEST -->|no| PROTOCOL
+    REQUEST -->|yes| SURFACE{Request surface}
     SURFACE -->|tools/call| TOOL_SHAPE{Known tool and valid MCP call shape?}
     TOOL_SHAPE -->|no| PROTOCOL
     TOOL_SHAPE -->|yes| TOOL_ADMIT{Work admitted?}
