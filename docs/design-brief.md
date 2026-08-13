@@ -42,6 +42,8 @@ annotation, agent orchestration, a universal knowledge graph, engineering
 calculations, design approval, or legal determinations. It also does not
 redistribute proprietary source documents. It retrieves and organizes evidence;
 it does not replace professional engineering judgement or statutory review.
+Users supply the source documents and remain responsible for their lawful
+possession and use.
 
 ## 3. Product outcomes
 
