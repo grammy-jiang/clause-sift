@@ -27,6 +27,8 @@ The central architectural decision is to separate the system into two parts:
 - an offline knowledge-base compiler that performs expensive parsing, OCR, structural analysis, chunking, embedding, indexing, validation, and release generation;
 - a lightweight, read-only runtime that loads a compiled knowledge-base release and serves evidence through a Python API, CLI, and MCP server.
 
+The compiler materializes a canonical **Evidence Graph**—the storage-neutral logical model formed by canonical evidence nodes and their typed structural and semantic relationships—together with rebuildable retrieval indexes. The graph organizes source-grounded evidence; it never replaces the original documents as authority.
+
 This design allows ClauseSift to use slow, high-quality processing during infrequent document builds while keeping normal query operations fast and operationally simple.
 
 ---
@@ -35,7 +37,7 @@ This design allows ClauseSift to use slow, high-quality processing during infreq
 
 Engineering design work frequently requires repeated consultation of several document classes:
 
-- mandatory or referenced standards;
+- standards containing normative provisions or referenced by other sources;
 - codes and regulations;
 - recommended design guidelines;
 - technical manuals;
@@ -49,7 +51,7 @@ More importantly, generic RAG systems often treat documents as unstructured text
 
 - clause numbers must be preserved;
 - document editions must not be mixed;
-- mandatory requirements must be distinguished from guidance and notes;
+- `required`/`prohibited` source provisions must be distinguished from recommendations, informative material, and notes;
 - exceptions and parent scope conditions must accompany isolated requirements;
 - table headers, units, and row context must survive extraction;
 - citations must resolve to an original page and, where possible, a bounding box;
@@ -187,7 +189,7 @@ Parser anomalies, unresolved references, low-confidence OCR, conflicting edition
 flowchart LR
     U[Engineer] --> C[Claude Desktop / Claude Code]
     C <-->|MCP stdio| R[ClauseSift Runtime]
-    R --> K[Compiled KB Release]
+    R --> K[Compiled KB Release: Evidence Graph and indexes]
     B[ClauseSift Builder] --> K
     S[Local source documents] --> B
     M[Human-maintained manifests] --> B
@@ -242,6 +244,68 @@ flowchart TB
     M --> Runtime
     EP --> MCP[MCP / Python / CLI]
 ```
+
+### 7.1 Evidence Graph architecture
+
+The **Evidence Graph** is ClauseSift's versioned, deterministic, source-grounded logical graph of canonical engineering-evidence nodes and typed relationships. Its nodes are the canonical document-model nodes in Section 12; its edges are the validated structural relationships and typed semantic or cross-document relationships described by the catalog and Section 20. The name describes a logical contract, not a storage product: v0.1 persists the graph relationally in `knowledge.sqlite` and requires no Neo4j, RDF, SPARQL service, generic graph database, or universal knowledge graph.
+
+The architecture has five distinct layers:
+
+```mermaid
+flowchart LR
+    A[Authoritative sources: files, pages, manifests] --> G[Canonical Evidence Graph in SQLite]
+    G --> I[Derived retrieval artifacts]
+    Q[Runtime query] --> I
+    I --> S[Bounded runtime evidence subgraph]
+    G --> S
+    S --> P[Evidence Package]
+    P --> C[MCP, Python, and CLI clients]
+```
+
+1. **Authoritative source layer:** original files and pages plus human-reviewed manifests. These remain authoritative for text, identity, edition, status, and other manifest-owned facts.
+2. **Canonical Evidence Graph:** immutable canonical nodes and validated relationships compiled for one release. It preserves document structure, source identity, applicability, dependencies, cross-references, and the information required to reconstruct provenance.
+3. **Derived retrieval artifacts:** lexical indexes, embeddings, vector indexes, and caches. They accelerate candidate selection and are rebuildable from release inputs; they are never graph or source authority.
+4. **Runtime evidence subgraph:** a bounded, deterministic selection consisting of retrieval seeds and context attached under declared relationship and traversal rules. It is a per-request view, not a mutable persisted graph.
+5. **Evidence Package:** the client-facing serialization of that selected subgraph, including original source-backed evidence, metadata-only empty structural targets, citations, provenance, retrieval metadata, and visible warnings.
+
+Every published graph is bound to the release ID, graph-schema version, exact Section 12.2 evidence-vocabulary version/artifact hash, source hashes, and deterministic build inputs. Node identity is independent of a database engine. Every authoritative graph edge and classification has declared semantics and either source provenance or an explicitly identified deterministic derivation; the word “graph” does not permit arbitrary LLM-generated facts. A future probabilistic relationship or classification class would require a separate typed contract, provenance, confidence and review policy, and cannot be silently promoted to an authoritative value or edge.
+
+Unresolved references remain explicit non-navigable records. Cycles in structural ownership are invalid; cycles among otherwise valid semantic references may exist but do not authorize unbounded traversal. Superseded editions and duplicate-looking requirements remain distinct through release-scoped document and node identity. Missing optional coordinates do not erase a node when its source text and document/clause identity are valid, but the absence remains visible in provenance and warnings. Table rows retain inherited headers, units, and parent context through declared relationships rather than retrieval-time guessing. New node or relationship types require versioned vocabulary/schema changes and must fail visibly in an older runtime.
+
+Sections 12–14 define graph nodes and relational persistence, Sections 19–20 define context and semantic relationships, and Section 21 defines serialization. Later sections may refine relationship, provenance, traversal, and conflict contracts, but they must reuse this layered model rather than introduce a parallel graph or entity system.
+
+### 7.2 Evidence Lineage
+
+**Evidence Lineage** is the mandatory, deterministic derivation record for every source-backed Evidence Package `evidence` item. It answers three separate questions without changing source authority: where the quoted evidence came from, which build transformations produced its canonical representation, and why the runtime selected or attached it. A metadata-only `context_targets` record is not an evidence item and claims no quoted source span: Section 21 instead binds its exact catalog/manifest projections and accepted assembly paths to the active release. The complete source-backed lineage is:
+
+```text
+approved manifest + exact source bytes
+    -> parser-neutral output(s) + parser-validation report
+    -> canonical node(s) + page-provenance mappings
+    -> chunk + source record
+    -> checksummed lexical/vector/model artifacts
+    -> retrieval candidate + fusion/rerank decision
+    -> zero or more typed context edges
+    -> Evidence Package item
+```
+
+The contract has three non-interchangeable dimensions:
+
+| Dimension | Required meaning | Authority boundary |
+| --- | --- | --- |
+| **Source provenance** | Approved manifest-content hash, exact source-file hash and size, stable document/source identities, contributing canonical-node byte spans, and their ordered page/box mappings. | Original source bytes and the approved manifest remain authoritative. Missing optional boxes are represented explicitly; they are never reconstructed by a model. |
+| **Build provenance** | Ordered parser roles and content hashes, passing validation-report hash, evidence-vocabulary version/hash, exact per-node classification values/origins/support, canonical/page/chunk transformation hashes and versions, stable node/chunk identities, diagnostic state, catalog hash, `build_content_id`, and lineage-schema version. | Parsers and deterministic transforms describe derivation, not new source facts. A comparator validates the selected primary output but never silently merges into it; a classification cannot outrank its source or approved manifest. |
+| **Retrieval and assembly provenance** | Every contributing retrieval channel and release-artifact hash, candidate rank/score where meaningful, rerank decision, selection role, originating seed source, and each accepted context path as ordered typed edge steps with rule IDs. | Indexes, scores, ranking models, and traversal choices are non-authoritative selection metadata. They cannot create source text, applicability, or graph relationships. |
+
+The builder materializes the first two dimensions plus release-artifact references as RFC 8785 canonical `lineage.json` after the retrieval artifacts are complete and before `build_content_id` is derived. It contains exactly one record for every manifested document and, beneath it, exactly one source-lineage record for each of that document's catalog `sources` rows. It identifies every selected parser route and ordered transformation by kind, role, producer/version/configuration hash, and content hash, identifies the canonical catalog and retrieval artifacts, and binds every contributing node to the exact three Section 12.2 classification-provenance records validated in the catalog. It contains no source locator, source text, credential, wall-clock timestamp, random run ID, `build_content_id`, `release_id`, or self-hash. The internal catalog retains the normalized source locator needed for authorized page access, but that path is never a public lineage field. The later release manifest binds the lineage-file hash, `build_content_id`, and `release_id` without a recursive identity dependency. The runtime joins that verified record to the catalog's node, classification, chunk, source, membership, and page-span rows and adds the per-request assembly dimension; no parallel entity store is introduced.
+
+Lineage is release-scoped and immutable. Stable document, node, chunk, source, relationship-occurrence, and edge identities survive a byte-identical rebuild. A changed source hash, approved manifest content, evidence vocabulary/classification, selected parser/configuration, canonical transformation, retrieval artifact, lineage schema, or admitted traversal/ranking configuration changes the corresponding artifact hash and therefore the build/release identity. A different runtime query changes only its per-request assembly lineage and never mutates the release. Reusing a filename for different bytes cannot preserve lineage, rollback restores the earlier release and its lineage together, and regenerated indexes are distinguishable unless their admitted bytes and all declared inputs are identical.
+
+For source-bearing evidence, ordered lineage spans are the exact intersections of `chunk_nodes` membership with `node_page_spans`. They support a chunk assembled from several blocks or pages without inventing one scalar origin. `coordinate_status` is `page_and_box` only when every contributing page mapping has validated boxes and `page_only` otherwise; a missing box is accompanied by `source_coordinate_incomplete`. Because Section 14.1 requires complete page mapping for non-empty source text, `unavailable` is invalid on an Evidence Package evidence item. A metadata-only `context_targets` record omits coordinate status and all source-provenance fields rather than manufacturing an unavailable source. OCR use, minimum admitted OCR confidence, and parser-comparison status remain build uncertainty rather than source facts. A below-threshold comparison difference may ship only with `parser_comparison_difference`; a blocking disagreement produces no release and therefore no evidence lineage.
+
+Runtime assembly records use the closed selection roles `retrieval_seed`, `expanded_context`, and `conflict_context`; several may appear when an item was selected in several ways. A direct result has its own `source_id` as a seed and an empty context-path array. An expanded item names every contributing seed and at least one accepted path. A conflict-attached item names every matching conflict/position and triggering source in its conflict reasons; it needs a context path only when graph traversal also reached it. Each path binds one originating seed and one context class to ordered steps; every step records the stable edge ID, canonical relation type, traversal direction, source and target node IDs, complete origin-qualified occurrence groups, and the versioned context-rule ID. Exact duplicate `(seed source, context class, edge-ID sequence)` paths are collapsed; the same edge sequence admitted under different context classes and every independently routed path are retained in deterministic order. Conflict reasons are likewise retained. An unresolved or ambiguous relationship has no navigable edge or path: it remains a warning-bearing occurrence and can never explain inclusion of an absent target.
+
+Every public evidence item must carry the strict Section 21 lineage object. The central serializer constructs it only from the checksum-verified active release and typed runtime decisions, rejects missing or unknown fields, and never accepts client-supplied lineage. Absolute paths, raw parser internals, configuration bodies, exception text, and secrets are excluded; hashes and safe producer identifiers are sufficient for reproducibility. Generated summaries, model scores, and future inferred metadata remain explicitly non-authoritative and cannot be cited as source provenance.
 
 ---
 
@@ -366,13 +430,15 @@ Each document should have a human-reviewed manifest.
 Example:
 
 ```yaml
-manifest_schema_version: "1"
+manifest_schema_version: "2"
+evidence_vocabulary_version: "1.0.0"
 document_id: as-1668-1-2015
 title: AS 1668.1:2015
 document_code: AS 1668.1
 edition: "2015"
 authority: Standards Australia
-document_type: mandatory_standard
+document_type: standard
+normative_status: normative
 release_tier: critical
 jurisdictions:
   - Australia
@@ -382,8 +448,7 @@ disciplines:
   - fire_safety
 status: active
 effective_from: null
-supersedes: null
-superseded_by: null
+relations: []
 reference_edition_overrides: {}
 language: en
 source_file: corpus/originals/AS1668.1-2015.pdf
@@ -392,26 +457,23 @@ sha256: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 Registration computes a raw `manifest_bytes_hash` for provenance before decoding, then loads the YAML with a safe loader that rejects custom tags and validates it against a versioned schema with unknown fields rejected. It separately computes `manifest_content_hash` over the schema-normalized canonical representation. SHA-256 values use the canonical string form `sha256:` followed by exactly 64 lowercase hexadecimal characters; bare digests, uppercase characters, and surrounding whitespace are invalid. The non-zero value above is illustrative and registration must replace it with the digest calculated from the selected source bytes before human approval. `sha256` is mandatory and non-null for any manifest admitted to a build. Registration also records the selected source's positive byte size.
 
+`relations` is a semantic set normalized by sorting its RFC 8785 entry bytes; YAML order is not meaningful and duplicate canonical entries are invalid. Each strict entry has exactly `{manifest_relation_entry_schema_version: "manifest-relation.v1", relation_type, source_selector_kind, source_clause, target_document_id, target_selector_kind, target_clause}`. `source_selector_kind` is `document_root` with null `source_clause` or `addressable_clause` with a normalized non-null source clause; the latter must resolve uniquely in this manifest's document. `target_document_id` is an exact immutable release document ID. `target_selector_kind` is `document_root` with null `target_clause` or `addressable_clause` with a normalized non-null target clause. v0.1 manifest entries admit only `supersedes`, `amends`, `depends_on`, and `applies_subject_to`: `supersedes` requires root-to-root selectors, `amends` requires a root source, and the other two require an addressable-clause source. The selected nodes must satisfy Section 20.1; therefore a manifest cannot name a non-addressable exception, requirement, paragraph, row, or other canonical node in v0.1. Source-text extraction remains the route for those endpoints. The inverse `superseded_by` view is derived from validated `supersedes` entries rather than stored as a second manifest assertion.
+
 Every manifest value that becomes a public exact lookup key or filter—`document_code`, `edition`, and each jurisdiction and discipline—must contain 1-128 Unicode scalar values after its field-specific canonical normalization. Registration applies the same bound both before and after normalization and rejects rather than truncates, hashes, or aliases an over-limit value. Closed enums retain their narrower enumerated contracts. Source inspection also rejects a document whose page count is outside `1..2,147,483,647`, the public page-number domain, before page mapping or cache promotion.
 
 The immutable approval binds the schema-normalized `manifest_content_hash` and selected source hash. Before ingestion, the builder safe-loads and canonicalizes the current manifest and requires exact equality with the approved content hash, then verifies the source hash and size. A semantic manifest or source change invalidates approval and affected caches. A raw-byte-only change—such as comments, whitespace, encoding, or key order that leaves canonical content unchanged—does not require human reapproval or invalidate semantic artifacts; the builder records the current `manifest_bytes_hash` and the change only in the external operator lifecycle ledger for forensic provenance. Raw manifest bytes and their hash are not release or runtime catalog authority.
 
-`release_tier` is either `critical` or `standard`. A critical document is one whose omission or structurally incorrect parsing can invalidate a release; it is subject to the dual-parser and release-blocking rules in Section 11.3.
+`release_tier` is either `critical` or `standard`. A `release_tier: critical` document is one whose omission or structurally incorrect parsing can invalidate a release; it is subject to the dual-parser and release-blocking rules in Section 11.3. Tier terminology always uses this qualified form so it cannot be confused with `document_type: standard`.
 
-The initial closed document `status` enum is `active`, `superseded`, and `withdrawn`. Values are exact lowercase ASCII tokens: aliases, case folding, and unrecognized values are rejected at registration with `document_status_unknown`, rather than normalized into one of the enum members. Status is independent of `document_type` and effective-date metadata. `search_evidence.status` and `list_documents.status` use this same enum when non-null; `active` is the search default, while an explicit null removes the default status filter so superseded and withdrawn documents can remain available for historical work.
+The initial closed document `status` enum is `active`, `superseded`, and `withdrawn`. Values are exact lowercase ASCII tokens: aliases, case folding, and unrecognized values are rejected at registration with `document_status_unknown`, rather than normalized into one of the enum members. Status is independent of `document_type`, `normative_status`, and effective-date metadata. An amendment is a separate document/node linked by `amends`, not a fourth lifecycle status. `search_evidence.status` and `list_documents.status` use this same enum when non-null; `active` is the search default, while an explicit null removes the default status filter so superseded and withdrawn documents can remain available for historical work.
+
+`authority` is the human-reviewed issuer or publisher identity, not a precedence score or legal-enforceability conclusion. `jurisdictions` and `disciplines` are independent, multi-valued human-reviewed sets; an empty set means unknown or unclassified, never universal applicability. `normative_status` uses the Section 12.2 vocabulary and describes the source's declared technical role, not whether a court, regulator, contract, or project makes it legally binding. These manifest-owned facts cannot be populated or changed by a parser, retrieval ranker, or language model.
 
 ### 10.4 Initial document types
 
-- `mandatory_standard`
-- `referenced_standard`
-- `code_or_regulation`
-- `design_guideline`
-- `technical_manual`
-- `manufacturer_specification`
-- `research_reference`
-- `superseded_document`
+`document_type` is one source-genre classification, not a bundle of lifecycle, applicability, or normative meaning. Manifest schema v2 accepts exactly `standard`, `code_or_regulation`, `design_guideline`, `technical_manual`, `manufacturer_specification`, and `research_reference`; Section 12.2 is the single normative location for their meanings and all other evidence-vocabulary dimensions.
 
-Document type is part of evidence and affects how an AI client should describe the source.
+Manifest schema v2 therefore rejects the former composite aliases `mandatory_standard`, `referenced_standard`, and `superseded_document`. Human migration decomposes them respectively into `standard` plus the source's supported `normative_status` and exact applicability/dependency context; `standard` plus the incoming typed reference/dependency relation; and the document's ordinary source genre plus `status: superseded`. Registration never assumes that a former “mandatory” label proves legal force or guesses any migration. A legacy manifest must be reviewed and rewritten under schema v2 before ingestion.
 
 ---
 
@@ -428,7 +490,7 @@ Initial candidate paths:
 - Docling for structured standards and ordinary technical PDFs;
 - PyMuPDF-based extraction for deterministic page text and coordinate comparison;
 - MinerU or another OCR pipeline for scanned or difficult documents;
-- dual-parser comparison for critical documents.
+- dual-parser comparison for `release_tier: critical` documents.
 
 No parser selection becomes permanent until it is measured against the project evaluation corpus.
 
@@ -448,6 +510,7 @@ Every parser adapter must produce a parser-neutral intermediate representation c
 - source page numbers;
 - bounding boxes;
 - original extracted text;
+- exact source labels/markers and spans relevant to structural type, normative status, or modality, without adapter-specific aliases becoming canonical values;
 - OCR status and confidence;
 - parser warnings.
 
@@ -466,19 +529,19 @@ The builder must test:
 - unresolved page coordinates;
 - differences between two parser outputs when comparison mode is enabled.
 
-Comparison mode is mandatory for every `critical` document and optional for a `standard` document. The enabled state is part of the versioned, approved parser-routing configuration and cache identity; changing it requires review before rebuilding, so a failed standard comparison cannot be bypassed by silently disabling the mode. Whenever comparison mode is enabled, the document must be parsed independently by two configured adapters backed by distinct parser implementations; running one implementation twice or changing only its options does not satisfy this rule. Neither adapter's output becomes canonical until the comparison gate passes. Enabling comparison mode is therefore a gating build-policy choice, not an advisory shadow run.
+Comparison mode is mandatory for every `release_tier: critical` document and optional for a `release_tier: standard` document. The enabled state is part of the versioned, approved parser-routing configuration and cache identity; changing it requires review before rebuilding, so a failed `release_tier: standard` comparison cannot be bypassed by silently disabling the mode. Whenever comparison mode is enabled, the document must be parsed independently by two configured adapters backed by distinct parser implementations; running one implementation twice or changing only its options does not satisfy this rule. Neither adapter's output becomes canonical until the comparison gate passes. Enabling comparison mode is therefore a gating build-policy choice, not an advisory shadow run.
 
-For every comparison-mode document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, or page mapping appears in only one output; clause identities or ordering differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds the configuration selected for that document's release tier. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which remains available after failure and is never itself canonical authority. A passing report is additionally promoted byte-for-byte into the content-addressed parser-validation cache and its hash becomes a canonical-model input; a failed report is retained only as a diagnostic and never enters canonical or downstream artifact caches. A blocked document may proceed only after correcting the parser, source, manifest, or comparison-mode routing configuration and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
+For every comparison-mode document, any of the following is a blocking disagreement: either adapter fails; parsed page counts differ from the source or each other; a normative clause, exception, table, source role/modality marker, or page mapping appears in only one output; clause identities, ordering, or a material Section 12.2 classification differ; a table's dimensions, headers, units, or cell values differ; or any versioned comparison metric exceeds the configuration selected for that document's release tier. Step 7 writes a durable parser-validation report before evaluating the blocking gate. The report identifies both adapters and includes both parser-neutral outputs when produced, an explicit sanitized failure record in place of any missing output, every single-parser result, every comparison metric, and every disagreement. The gate is not considered evaluated until that report is successfully finalized in the build's diagnostic-report area, which remains available after failure and is never itself canonical authority. A passing report is additionally promoted byte-for-byte into the content-addressed parser-validation cache and its hash becomes a canonical-model input; a failed report is retained only as a diagnostic and never enters canonical or downstream artifact caches. A passing comparison with any non-zero below-threshold difference records `parser_comparison_difference` in that promoted report so Section 7.2 can preserve the uncertainty on affected evidence. A blocked document may proceed only after correcting the parser, source, manifest, vocabulary/classification rule, or comparison-mode routing configuration and rerunning the build; v0.1 has no waiver that selects one output while a blocking disagreement remains.
 
-The versioned parser-routing configuration must name exactly one `canonical_primary` for every document. It additionally names exactly one ordered `independent_comparator` for every comparison-mode document, either directly or through a deterministic rule over manifested fields; a standard document outside comparison mode has only the primary route. Every selected adapter's identity, version, configuration, and assigned role is a build input. After the primary's single-parser gate and, when applicable, the comparator's single-parser gate and comparison gate pass, the builder selects the `canonical_primary` parser-neutral artifact byte-for-byte as the sole input to deterministic canonical-model construction; the comparator is validation-only. Below-threshold wording or OCR differences therefore resolve to the primary output, never to field-by-field merging, majority selection, or build-order choice. Changing an adapter or role invalidates the parse and all downstream cache entries and requires a complete rebuild and review. With unchanged source bytes, ordered roles, adapters, and configurations, both the selected parser artifact and resulting canonical model must be byte-identical across rebuilds.
+The versioned parser-routing configuration must name exactly one `canonical_primary` for every document. It additionally names exactly one ordered `independent_comparator` for every comparison-mode document, either directly or through a deterministic rule over manifested fields; a `release_tier: standard` document outside comparison mode has only the primary route. Every selected adapter's identity, version, configuration, and assigned role is a build input. After the primary's single-parser gate and, when applicable, the comparator's single-parser gate and comparison gate pass, the builder selects the `canonical_primary` parser-neutral artifact byte-for-byte as the sole input to deterministic canonical-model construction; the comparator is validation-only. Below-threshold wording or OCR differences therefore resolve to the primary output, never to field-by-field merging, majority selection, or build-order choice. Changing an adapter or role invalidates the parse and all downstream cache entries and requires a complete rebuild and review. With unchanged source bytes, ordered roles, adapters, and configurations, both the selected parser artifact and resulting canonical model must be byte-identical across rebuilds.
 
-A document that fails any applicable single-parser or comparison gate must not enter a production release; critical documents cannot disable comparison mode.
+A document that fails any applicable single-parser or comparison gate must not enter a production release; `release_tier: critical` documents cannot disable comparison mode.
 
 ---
 
 ## 12. Canonical document model
 
-The canonical document model isolates the rest of ClauseSift from parser-specific output formats.
+The canonical document model isolates the rest of ClauseSift from parser-specific output formats. Its canonical nodes are the node set of the Evidence Graph; parser-native objects and retrieval chunks are not a parallel entity graph.
 
 ### 12.1 Core node fields
 
@@ -486,6 +549,9 @@ The canonical document model isolates the rest of ClauseSift from parser-specifi
 node_id
 document_id
 node_type
+normative_status
+source_modality
+classification_provenance
 parent_node_id
 previous_node_id
 next_node_id
@@ -501,25 +567,100 @@ attributes
 
 A non-null `clause_number` declares that the node is independently addressable by exact clause lookup. It must contain the canonical normalized, non-empty identifier for that document; descendants that are not independently addressable keep it null rather than copying an ancestor's number for display. The catalog constraints in Section 14.1 make every non-null `(document_id, clause_number)` unique, so exact lookup cannot select between two canonical subtrees. Page bounds and bounding boxes are logical read-only projections of the authoritative ordered `node_page_spans` rows in Section 14.1, not independently writable node columns.
 
-### 12.2 Initial node types
+### 12.2 ClauseSift Engineering Evidence Vocabulary
 
-- `document`
-- `part`
-- `chapter`
-- `section`
-- `clause`
-- `subclause`
-- `paragraph`
-- `requirement`
-- `definition`
-- `exception`
-- `note`
-- `table`
-- `table_row`
-- `figure`
-- `caption`
-- `appendix`
-- `footnote`
+This section is the normative **ClauseSift Engineering Evidence Vocabulary**. Version `1.0.0` is a small storage-neutral contract for document/evidence semantics shared by manifests, parser adapters, canonical nodes, relationship validation, traversal, conflicts, public APIs, reports, and evaluation fixtures. It is not OWL, RDF, SKOS, SHACL, a reasoner, a graph database schema, or a general ontology of engineering equipment and physics.
+
+#### 12.2.1 Orthogonal dimensions and authority
+
+One concept has one canonical name. A producer cannot combine dimensions into an undeclared alias or infer one dimension from another:
+
+| Dimension | v1 values or form | Cardinality, owner, and meaning |
+| --- | --- | --- |
+| Document identity | `document_id`, `document_code`, `edition` | Exactly one manifested edition identity. Human-reviewed manifest authority; no “latest” substitution. |
+| Document type | Section 10.4 closed source-genre enum | Exactly one human-reviewed manifest value. It describes what the source is, not whether it is active, binding, or referenced. |
+| Lifecycle status | `active`, `superseded`, `withdrawn` | Exactly one human-reviewed manifest value. `amended` is represented by an `amends` relation and distinct edition identity, not a status alias. |
+| Authority | Normalized issuer/publisher identity | Exactly one non-empty human-reviewed manifest value. It is not a precedence rank or legal conclusion. |
+| Jurisdiction | Normalized manifest strings | A unique sorted set; empty means unknown/unclassified, not worldwide. Values do not establish precedence. |
+| Discipline | Normalized manifest strings | A unique sorted set; empty means unknown/unclassified. It is a filter facet, not node type. |
+| Normative status | `normative`, `informative`, `mixed`, `unknown` | Exactly one document value and one node value. `mixed` is valid only for a document or container node with differently classified descendants; a source-bearing leaf is `normative`, `informative`, or `unknown`. This is the source's declared technical role, not a legal-enforceability judgment. |
+| Source modality | `required`, `prohibited`, `recommended`, `permitted`, `descriptive`, `not_applicable`, `unknown` | Exactly one node value. It records source wording or an approved deterministic source convention. It does not say whether the provision legally or contractually binds a particular project. |
+| Canonical node type | Section 12.2.2 closed enum | Exactly one parser-neutral node value. It describes structure/content kind and never absorbs normative status or modality. |
+| Applicability | Exact manifested scope plus `applies_subject_to`, `contains`, `exception_to`, `depends_on`, and other Section 20 records | Not a free boolean or guessed label. Applicability is source-grounded context whose completeness is evaluated under Sections 19 and 20. |
+| Relationship | Section 20 structural/semantic enum | One canonical direction, endpoint matrix, origin policy, and cycle policy per relation. This section references that contract and does not create aliases. |
+
+The document-type values in that model mean:
+
+| Value | Canonical meaning |
+| --- | --- |
+| `standard` | A consensus, industry, national, international, or organization-issued technical standard. Whether another source adopts it is represented by an exact `depends_on` or `references` relation, not by changing its type. |
+| `code_or_regulation` | A code, regulation, rule, or other government-issued instrument. ClauseSift records the source genre but does not independently determine legal force. |
+| `design_guideline` | Design guidance, handbook guidance, or recommended practice whose individual provisions may still carry distinct source modalities. |
+| `technical_manual` | An installation, operation, maintenance, or technical manual not classified as a manufacturer specification. |
+| `manufacturer_specification` | Product- or manufacturer-issued requirements, limits, instructions, or declared performance data. |
+| `research_reference` | Research, test, technical-report, or explanatory literature used as supporting evidence rather than a source-genre requirement. |
+
+`release_tier` (`critical` or `standard`) is an operational validation policy, not an evidence-vocabulary classification. Retrieval score, document recency, active status, source type, or authority cannot alter `normative_status`, `source_modality`, applicability, or precedence.
+
+#### 12.2.2 Canonical node types
+
+| Node type | Parser-neutral definition |
+| --- | --- |
+| `document` | The sole root representing one manifested edition. |
+| `part` | A named top-level division that groups chapters, sections, or other document content. |
+| `chapter` | A numbered or named major division beneath a document or part. |
+| `section` | A structural division below a chapter/part and above or alongside addressable clauses. |
+| `clause` | An independently addressable provision at the document's clause level. |
+| `subclause` | An independently addressable provision structurally subordinate to a clause or subclause. |
+| `paragraph` | A prose block positively classified as an ordinary paragraph rather than a specialized requirement, definition, exception, note, table object, or unresolved type. |
+| `requirement` | A source-bearing provision that expresses a constraint, action, prohibition, recommendation, or permission; `source_modality` records which, without asserting external legal force. |
+| `definition` | A source-bearing term definition whose governed scope is represented by `defines`. |
+| `exception` | A source-bearing qualification or exclusion whose affected provision is represented by `exception_to`; it remains a separate evidence identity. |
+| `note` | A labeled note or explanatory annotation. Its normative status is separate and never inherited merely because the note is attached to normative material. |
+| `table` | A complete structured table including its title, headers, units, and ordered cells/rows. |
+| `table_row` | One structured row interpreted only with its validated parent table context. |
+| `figure` | A figure, diagram, image, or chart as a source object. |
+| `caption` | Source text that labels or explains a figure, table, or other object. |
+| `appendix` | An appendix/annex container; `normative_status` distinguishes normative and informative appendices. |
+| `footnote` | A source footnote retained separately from the text it qualifies. Its attachment does not make it normative. |
+| `unclassified` | Conservative source-bearing content whose structural/content category cannot be resolved deterministically. It cannot be treated as a requirement, exception, definition, note, or type-constrained relation endpoint until reviewed. |
+
+Node type does not encode normative status. For example, an `appendix` may be normative or informative; a `requirement` may be `required`, `prohibited`, `recommended`, or `permitted`; and a `note` remains a note even when an approved source convention marks it normative.
+
+#### 12.2.3 Classification, inheritance, and ambiguity
+
+Every document classification is bound to the approved manifest hash. Every node carries one strict provenance record for each of `node_type`, `normative_status`, and `source_modality`: the selected value; origin (`manifest`, `source_marker`, `deterministic_rule`, `inherited`, or `human_reviewed`); rule/review identifier where applicable; and the exact source span, ancestor classification, manifest hash, or immutable review artifact supporting it. A language model may propose a review candidate but cannot write an admitted classification. Release validation reruns deterministic classifications and inheritance and rejects a stored/provenance mismatch.
+
+Inheritance is deliberately narrow:
+
+1. Document type, lifecycle status, authority, jurisdictions, and disciplines remain document facts. Evidence items project them for citation/filtering; nodes do not acquire independent copies that can drift.
+2. `node_type` never inherits. It is explicit in the canonical model.
+3. An explicit source marker or immutable human-reviewed node decision wins for `normative_status`. Otherwise, a node may inherit the nearest ancestor's explicit `normative` or `informative` value only through a versioned source-format rule. `mixed` and `unknown` never become a child's value by inheritance; without a qualifying rule/ancestor the child is `unknown`.
+4. `source_modality` never inherits from a document, heading, parent requirement, or adjacent text. It applies to the exact source-bearing statement. A structural container is normally `not_applicable`; a provision with unresolved or mixed wording is split deterministically or remains `unknown`.
+5. Applicability and scope propagate only through the validated Section 19/20 structural and semantic rules. Textual proximity, common headings, retrieval rank, or an incoming citation does not create applicability.
+6. A `note` or `footnote` does not acquire its parent's normative status or modality through containment; only its own explicit marker or a versioned source convention specific to that annotation kind may classify it. An `exception` retains its own identity, classification, and exact `exception_to` relation. Retrieval/context expansion copies classifications byte-for-byte and cannot promote informative or unknown material.
+
+When a `release_tier: standard` parse cannot distinguish paragraph/requirement/note or determine role/modality, the canonical node is `unclassified` with `normative_status: unknown`, `source_modality: unknown`, and `classification_unresolved`; it remains retrievable but supplies no type-dependent semantic edge. A `release_tier: critical` document is blocked when its manifested `normative_status` is `unknown` or any source-bearing node has `node_type: unclassified`, `normative_status: unknown`, or `source_modality: unknown`. A blocking dual-parser disagreement still follows Section 11.3 and produces no canonical node. No runtime or model maps `unknown`/`unclassified` to the nearest familiar value.
+
+#### 12.2.4 Versioning and extensions
+
+The builder materializes the exact core vocabulary as RFC 8785 `evidence-vocabulary.json`. It contains its semantic version, canonical enum order and definitions, allowed cardinalities, classification-origin rules, inheritance rules, and the exact Section 20 relation/endpoint contract version and configuration hash. The release manifest records its path, SHA-256, and vocabulary version; the catalog, lineage, context/conflict configurations, reports, and evaluation artifacts bind that hash. Existing release bytes therefore retain their original interpretation even after a later vocabulary is published.
+
+Changing a core name, definition, cardinality, inheritance rule, or relation endpoint requires a vocabulary and affected schema/configuration version change. Adding a core value is not silently backward compatible: a runtime accepts only an explicit supported-version allowlist, verifies the vocabulary artifact before opening the catalog, and fails startup with `release_integrity_failed` on an unsupported version, unknown core token, artifact mismatch, or catalog/artifact disagreement. It never case-folds, aliases, drops, or maps a future value.
+
+Future custom annotations may use a separately schema-validated `extensions` object with keys matching `^x-[a-z0-9][a-z0-9.-]*\.[a-z0-9][a-z0-9._-]*$`. Each used namespace declares an immutable schema ID, version, and SHA-256; the release manifest records the sorted namespace/schema/hash tuples, and the canonical extension bytes enter the affected artifact and release identities. An extension is an opaque annotation: it cannot populate a core field, relax validation, create a navigable edge, change traversal/conflict/precedence behavior, or enter a core filter. If behavior depends on it, that behavior requires a new supported core vocabulary/configuration. An older runtime either validates and exposes the explicitly supported opaque extension form or rejects the release; it never guesses its meaning.
+
+#### 12.2.5 Worked classification cases
+
+- A standard made applicable by a code remains `document_type: standard`; the exact code provision uses `depends_on` for normative dependency or `references` for a citation. Neither relation turns the whole standard into a universal legal mandate.
+- A design guideline containing “shall” language remains `document_type: design_guideline`, may be document-level `mixed`, and gives the exact provision `node_type: requirement`, `source_modality: required`. ClauseSift still makes no project-specific enforceability conclusion.
+- A superseded edition keeps its ordinary document type, has `status: superseded`, and remains linked to the newer distinct edition by `supersedes`; historical retrieval never rewrites it as active.
+- An amendment is its own manifested edition/source and uses `amends` to identify the exact document or node it changes. It is not silently merged into a base edition or represented as a document status.
+- Normative and informative appendices both use `node_type: appendix`; their explicit/inherited `normative_status` distinguishes them. A note inside a normative clause keeps its own informative/unknown status and modality.
+- Product-specific “must” instructions use `document_type: manufacturer_specification` plus a `requirement` node with `source_modality: required`; source authority is preserved without treating the instruction as a regulation.
+- Multiple jurisdictions and disciplines remain exact manifest sets. Missing values mean unknown and cannot prove either overlap or disjointness during conflict classification.
+- Lifecycle status is never `mixed` or inferred from publication dates. If one file appears to combine editions or its active/superseded/withdrawn state cannot be human-reviewed, registration splits the identities or fails `manifest_invalid`; it does not publish an ambiguous status.
+- A parser disagreement among paragraph, requirement, and note blocks under the `release_tier: critical` comparison policy; an admitted `release_tier: standard` ambiguity uses `unclassified`/`unknown` with provenance and a visible warning. A future custom type cannot occupy `node_type` until a supported core vocabulary version defines it.
 
 ### 12.3 Text variants
 
@@ -573,17 +714,22 @@ Every persisted chunk has non-empty source-faithful `original_text`. Chunk membe
 
 `chunk_kind` is a closed, versioned enum covering every representation emitted by the chunker, and the chunker configuration assigns every kind a unique rank. The builder deduplicates the exact representation key `(chunk_kind, ordered (node_id, node_text_start, node_text_end) memberships)`, sorts each document's remaining chunks by `(first member node canonical order, first member byte start, chunk-kind rank, last member node canonical order, last member byte end, SHA-256 of the ordered membership tuples, chunk_id)`, and persists a dense zero-based `canonical_order`. The final `chunk_id` tie-breaker is itself deterministically derived from the unchanged chunk inputs. Release validation recomputes the representation keys and ordering and rejects a duplicate representation, gap, duplicate position, unknown kind, or mismatch; runtimes order evidence by persisted `canonical_order` ascending.
 
+Preferred multi-node retrieval representations do not replace exact context representations. For every source-bearing node eligible as an atomic Section 19 target, the builder emits one or more chunks whose ordered membership intervals cover that node completely and contain no interval from another node; token-limit splits may provide that cover. These chunks have their own deterministic chunk/source IDs and may overlap a preferred requirement-plus-exception, note, or other multi-node representation. A release in which only a broader multi-node chunk covers an atomic context target is invalid.
+
 ### 13.3 Context integrity
 
 The chunker must preserve or link:
 
 - scope conditions inherited from parent clauses;
 - exceptions;
-- notes and their informative status;
+- notes/footnotes and their own Section 12.2 normative status and modality, without promotion from the parent;
 - table titles, headers, and units;
-- normative versus informative appendices;
+- appendix normative status and its classification provenance;
+- every member node's exact type, normative status, modality, and classification provenance;
 - source pages and bounding boxes;
 - previous and next logical units.
+
+Chunks and retrieval enrichment do not own a second vocabulary projection. An evidence item's scalar node type, normative status, and source modality project from its validated `citation_node_id`; the complete ordered Section 21 classification records preserve every retrievable member node's values. A whole-table or other valid container representation may therefore expose the container's scalar classification while retaining differently classified descendants, but it never collapses those descendant records or synthesizes a stronger scalar. Search/embedding enrichment may include deterministic labels only as non-authoritative text and cannot alter either projection.
 
 ### 13.4 Tables
 
@@ -608,32 +754,43 @@ SQLite should store:
 - chunks and text variants;
 - page and bounding-box mappings;
 - cross-references;
+- classified conflict records and exact position spans;
 - build metadata;
 - parser warnings;
 - release-admission metadata known at the catalog gate.
 
-SQLite is the source of truth for structured knowledge-base metadata.
+SQLite is the authoritative persisted representation of the compiled Evidence Graph and other structured knowledge-base metadata. This authority is about the deterministic compiled representation; original documents and human-reviewed manifests retain the evidence authority defined in Section 5.2.
 
-The current run's evaluation results are not written back into `knowledge.sqlite`: the candidate catalog is fully materialized and becomes byte-stable at step 13, before evaluation runs. Step 17 writes the authoritative, versioned `evaluation-results.json`; the static report and release manifest refer to that artifact by hash and carry only its derived summary. Post-gate evaluation, candidate-validation, activation, and rollback records likewise live outside the immutable catalog. No later build step reopens `knowledge.sqlite` for mutation.
+The current run's evaluation results are not written back into `knowledge.sqlite`: the candidate catalog is fully materialized and becomes byte-stable at step 13, before evaluation runs. Step 18 writes the authoritative, versioned `evaluation-results.json`; the static report and release manifest refer to that artifact by hash and carry only its derived summary. Post-gate evaluation, candidate-validation, activation, and rollback records likewise live outside the immutable catalog. No later build step reopens `knowledge.sqlite` for mutation.
 
 Every builder, validator, CLI, and MCP runtime SQLite connection executes `PRAGMA foreign_keys = ON` immediately after open and before starting a transaction, preparing a statement, creating schema, or reading/writing catalog data; the connection factory reads back `PRAGMA foreign_keys` and aborts unless it is `1`. Read-only runtime connections additionally enable and verify `PRAGMA query_only = ON`. Connection pooling may expose only connections initialized by this factory, and application queries cannot change either pragma. After the candidate catalog is fully materialized at step 13, the builder runs `PRAGMA foreign_key_check` and requires zero result rows before any derived builder runs; a disabled pragma or reported violation is a blocking `release_validation_failed`. The read-only runtime repeats `foreign_key_check` after opening the checksum-verified database and before starting the MCP session or serving a CLI/Python query; a disabled pragma or violation there follows the existing `release_integrity_failed` startup route. Neither condition is advisory.
 
 Primary keys, foreign keys, `NOT NULL` constraints, and uniqueness constraints must encode the canonical invariants rather than relying only on application code. The initial schema requires at least:
 
-`node_id`, `chunk_id`, `source_id`, and `cross_reference_id` are globally unique within a catalog release and remain stable across deterministic rebuilds of unchanged inputs. Every persisted public catalog identifier—`document_id`, `node_id`, `chunk_id`, `source_id`, and `cross_reference_id`—uses the same ASCII grammar as opaque tool identifiers: length 1-128 and pattern `^[a-z0-9][a-z0-9._:-]{0,127}$`. Registration validates manifested document IDs; deterministic generators validate every derived ID; the schema carries equivalent length/character checks; and release validation independently rechecks all five columns so a cache import cannot bypass the rule. The apparently redundant unique pairs `(document_id, node_id)` and `(document_id, chunk_id)` are ownership candidate keys: dependent tables and self-relations reference those pairs so SQLite proves that an otherwise global node or chunk ID belongs to the accompanying document.
+`node_id`, `chunk_id`, `source_id`, `cross_reference_id`, `conflict_id`, and `conflict_position_id` are globally unique within a catalog release and remain stable across deterministic rebuilds of unchanged inputs. Every persisted public catalog identifier—`document_id`, `node_id`, `chunk_id`, `source_id`, `cross_reference_id`, `conflict_id`, and `conflict_position_id`—uses the same ASCII grammar as opaque tool identifiers: length 1-128 and pattern `^[a-z0-9][a-z0-9._:-]{0,127}$`. Registration validates manifested document IDs; deterministic generators validate every derived ID; the schema carries equivalent length/character checks; and release validation independently rechecks all seven identifier columns so a cache import cannot bypass the rule. The apparently redundant unique pairs `(document_id, node_id)` and `(document_id, chunk_id)` are ownership candidate keys: dependent tables and self-relations reference those pairs so SQLite proves that an otherwise global node or chunk ID belongs to the accompanying document.
 
 Public human-readable lookup and filter keys use a different shared constraint: `documents.document_code`, `documents.edition`, every non-null `nodes.clause_number`, `document_jurisdictions.jurisdiction`, and `document_disciplines.discipline` contain 1-128 Unicode scalar values in their field-specific canonical normalized form. Manifest registration enforces the manifest-owned values, parser/canonical-model validation enforces generated clause keys, SQLite carries equivalent non-empty and length checks, and the step 13 release gate independently rechecks every stored value, including values imported from caches. These keys are never truncated or forced into the opaque-ID ASCII grammar. The manifest, canonical-model, and catalog schema versions change when this key contract changes so an older cache entry cannot bypass it.
 
 | Table | Required constraints |
 | --- | --- |
-| `documents` | `document_id` primary key; 1-128-scalar canonical `document_code` and `edition`, `document_type`, `release_tier`, `status`, normalized relative `source_file`, positive `source_file_size`, `manifest_content_hash`, `source_file_hash`, and `source_page_count` in `1..2,147,483,647` `NOT NULL`; unique `(document_code, edition)`; checks reject an absolute/empty source locator and `.` or `..` segments, and enforce the Section 10.4 document-type enum, `release_tier IN ('critical', 'standard')`, and `status IN ('active', 'superseded', 'withdrawn')`. The runtime resolves the locator beneath the configured originals root and applies the containment and link checks in Section 22.1. |
-| `nodes` | Globally unique `node_id` primary key; `document_id`, `node_type`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. `clause_number` is either null or a 1-128-scalar canonical normalized exact-lookup key, with a unique partial key `(document_id, clause_number) WHERE clause_number IS NOT NULL`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for the sole document root or sequence boundaries, may not equal `node_id`, and each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
+| `documents` | `document_id` primary key; 1-128-scalar canonical `document_code` and `edition`, `evidence_vocabulary_version`, `document_type`, `normative_status`, `release_tier`, `status`, normalized relative `source_file`, positive `source_file_size`, `manifest_content_hash`, `source_file_hash`, and `source_page_count` in `1..2,147,483,647` `NOT NULL`; unique `(document_code, edition)`; checks reject an absolute/empty source locator and `.` or `..` segments, require the release's exact Section 12.2 vocabulary version, enforce its document-type/normative-status enums, `release_tier IN ('critical', 'standard')`, and `status IN ('active', 'superseded', 'withdrawn')`. The runtime resolves the locator beneath the configured originals root and applies the containment and link checks in Section 22.1. |
+| `nodes` | Globally unique `node_id` primary key; `document_id`, vocabulary-valid `node_type`, `normative_status`, `source_modality`, `original_text`, and canonical order `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, node_id)` and unique `(document_id, canonical_order)`. Checks enforce the Section 12.2 enums and prohibit `mixed` normative status on a source-bearing leaf. `clause_number` is either null or a 1-128-scalar canonical normalized exact-lookup key, with a unique partial key `(document_id, clause_number) WHERE clause_number IS NOT NULL`. `parent_node_id`, `previous_node_id`, and `next_node_id` are nullable only for the sole document root or sequence boundaries, may not equal `node_id`, and each non-null relation uses composite foreign key `(document_id, related_node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
+| `node_classifications` | `document_id`, `node_id`, classification field (`node_type`, `normative_status`, or `source_modality`), exact selected value, origin, strict canonical provenance object, and provenance SHA-256 `NOT NULL`; primary key `(node_id, classification_field)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. The origin is one Section 12.2 token, its conditional source-span/ancestor/rule/review fields are closed and complete, and the selected value must equal the corresponding `nodes` column. Every node has exactly three rows. |
 | `chunks` | Globally unique `chunk_id` primary key; `document_id`, `citation_node_id`, closed-enum `chunk_kind`, dense zero-based `canonical_order`, non-empty `original_text`, `search_text`, and `embedding_text` `NOT NULL`; `document_id` foreign key to `documents`; unique ownership key `(document_id, chunk_id)`, unique `(document_id, canonical_order)`, and composite foreign key `(document_id, citation_node_id)` to `nodes(document_id, node_id)`. Validation requires the citation node to equal the deepest common ancestor of all member nodes and the nearest addressable-ancestor-or-null value to be identical for every retrievable member. `parent_chunk_id`, `previous_chunk_id`, and `next_chunk_id` are nullable only where the structural relation or sequence neighbor does not exist; each non-null relation uses composite foreign key `(document_id, related_chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`. |
 | `chunk_nodes` | `document_id`, `chunk_id`, `node_id`, `member_order`, `node_text_start`, and `node_text_end` `NOT NULL`; composite primary key `(chunk_id, node_id)` and unique `(chunk_id, member_order)`; checks require zero-based `member_order`, `node_text_start >= 0`, and `node_text_end > node_text_start`; composite foreign keys `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` and `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`. |
 | `node_page_spans` | `document_id`, `node_id`, half-open UTF-8 byte `node_text_start`, `node_text_end`, `page_number`, and `mapping_order` `NOT NULL`; primary key `(node_id, node_text_start, node_text_end, page_number)` and unique `(node_id, mapping_order)`; composite foreign key `(document_id, node_id)` to `nodes(document_id, node_id)` with `ON DELETE RESTRICT`; checks require valid non-empty byte spans, non-negative mapping order, page numbers in `1..2,147,483,647`, and schema-valid optional bounding boxes. Release validation requires every non-empty node's rows, in dense `mapping_order`, to form an exact non-overlapping partition of `[0, byte_length(nodes.original_text))`; adjacent rows meet at one boundary, while any overlap, duplicate coverage, gap, or out-of-order interval blocks release. An empty-text structural node has no span row. |
 | `document_jurisdictions` and `document_disciplines` | Both value columns are 1-128-scalar canonical normalized strings and `NOT NULL`; `document_id` foreign key to `documents`; composite primary key `(document_id, jurisdiction)` or `(document_id, discipline)`. |
 | `sources` | Globally unique `source_id` primary key; `document_id`, `chunk_id`, and page span `NOT NULL`; `document_id` foreign key to `documents`; composite foreign key `(document_id, chunk_id)` to `chunks(document_id, chunk_id)` with `ON DELETE RESTRICT`; unique `(document_id, chunk_id)`; page span check enforces ordered endpoints in `1..2,147,483,647`. |
-| `cross_references` | Globally unique `cross_reference_id` primary key; source node and document IDs, relation type, raw text, normalized parsed target fields, and resolution status `NOT NULL` where the reference grammar supplies them; composite foreign key `(source_document_id, source_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. All ownership foreign keys use `ON DELETE RESTRICT`. Source and resolved-target document code, edition, and clause are read-only join projections rather than independently writable base columns. |
+| `cross_references` | Globally unique content-derived `cross_reference_id` primary key; logical source node and source document IDs, conditional evidence-bearing occurrence-node ID, closed-enum relation type, relation origin, and target-selector kind, conditional raw text, source-occurrence and target-token byte bounds, explicit-target ordinal, selector-input hash, manifest-relation-entry hash, normalized parsed target fields, conditional proposed target-node ID, selector rule/provenance, and resolution status `NOT NULL` as required by Section 20.2; composite foreign keys `(source_document_id, source_node_id)` and, when non-null, `(source_document_id, occurrence_node_id)` to `nodes(document_id, node_id)`. A `resolved` row requires both target IDs and composite foreign key `(target_document_id, target_node_id)` to `nodes(document_id, node_id)`; every unresolved row requires both target IDs to be null. Occurrence-ID recomputation, endpoint-type checks, occurrence-anchor/source-endpoint derivation, origin-authority checks, and relation-specific cycle rules follow Section 20. All ownership foreign keys use `ON DELETE RESTRICT`. Source and resolved-target document code, edition, and clause are read-only join projections rather than independently writable base columns. |
+| `conflicts` | Globally unique content-derived `conflict_id` primary key; release state, candidate-identity schema version, comparison-key hash, detector identity/version/configuration hash, conflict-rule-set version/configuration hash, context-rule-set version/configuration hash, decision origin, precedence status, decision-schema version, and decision-artifact hash `NOT NULL`; nullable explanation code, precedence-rule ID, and controlling position. State is only `confirmed`, `explained`, or `unresolved`—a `potential` row is release-invalid. Decision origin is `deterministic_rule` or `human_reviewed`; precedence is `not_applicable`, `encoded`, or `undetermined`. `encoded` requires a non-null controlling position and approved precedence-rule ID; other precedence states require both null. A deferred composite foreign key `(conflict_id, controlling_position_id)` references `conflict_positions(conflict_id, conflict_position_id)` when non-null. |
+| `conflict_dimensions` | `conflict_id` and closed-enum dimension `NOT NULL`; composite primary key `(conflict_id, dimension)` and foreign key to `conflicts` with `ON DELETE RESTRICT`. Every conflict must have at least one row. |
+| `conflict_positions` | Globally unique content-derived `conflict_position_id` primary key; `conflict_id`, dense zero-based `position_order`, strict canonical comparison projection and SHA-256, and strict required-context projection and SHA-256 `NOT NULL`; unique `(conflict_id, conflict_position_id)` and `(conflict_id, position_order)`; foreign key to `conflicts` with `ON DELETE RESTRICT`. The projection schemas are selected by the dimension/rule and contain no generated summary. Every conflict must have at least two positions. |
+| `conflict_position_spans` | `conflict_id`, `conflict_position_id`, dense zero-based `span_order`, `document_id`, `node_id`, non-empty half-open UTF-8 `node_text_start`/`node_text_end`, and exact `source_text_sha256` `NOT NULL`; primary key `(conflict_position_id, span_order)`; unique exact span per position; composite foreign keys `(conflict_id, conflict_position_id)` to `conflict_positions` and `(document_id, node_id)` to `nodes` with `ON DELETE RESTRICT`. Every position has at least one span; its spans are canonically ordered by document/node canonical order/byte range and do not overlap within one node. |
+| `conflict_position_sources` | `conflict_id`, `conflict_position_id`, `source_id`, and dense zero-based `selection_order` `NOT NULL`; primary key `(conflict_position_id, source_id)` and unique `(conflict_position_id, selection_order)`; composite foreign key `(conflict_id, conflict_position_id)` to `conflict_positions` and foreign key `source_id` to `sources` with `ON DELETE RESTRICT`. Every position has the non-empty exact source-cover set independently recomputed by Section 20.3. |
+
+Release validation verifies the exact admitted `evidence-vocabulary.json` hash/version before interpreting catalog values. It rejects a legacy composite document type, unknown core token, missing/duplicate classification row, illegal origin/provenance shape, stored-versus-provenance value mismatch, non-inheritable classification, or deterministic recomputation difference. It also enforces the Section 12.2 tier policy for `unclassified`/`unknown` nodes and proves that every type-constrained Section 20 endpoint uses an admitted compatible node type.
+
+Release validation rebuilds every conflict candidate ID and comparison/required-context projection from source spans, manifests, typed relations, and detector/rule/context configuration, independently of any decision or review input. It then validates the exact decision/review candidate and hash, reruns every deterministic explanation/confirmation rule, and requires exact equality with the stored state, dimensions, explanation, precedence, positions, projections, ordering, and Section 20.3 position-source cover. It proves two or more dense positions, one or more dense valid non-overlapping spans per position, UTF-8 boundaries and ownership, complete deterministic source coverage for every position, and an exact review candidate/hash match. A stale review, `potential` state, one-sided record, duplicate/overlapping position span, missing or non-canonical source cover, controlling position outside the record, model-only confirmation, or stored-versus-recomputed difference is `release_validation_failed`. It additionally computes each conflict's touched release tiers: an `unresolved` record touching any `release_tier: critical` document is blocking; a complete `confirmed`, `explained`, or unresolved record touching only `release_tier: standard` documents follows Section 20.3.
 
 Before any subtree or context query runs, release validation proves that every document's node parent relation is one rooted tree. Each document has exactly one null-parent node of type `document`; every other node has exactly one parent in that document whose canonical order is lower than the child's. A recursive traversal seeded at that root must visit every document node exactly once, and explicit path tracking must report a self-edge, repeated node, disconnected component, or parent cycle. The same gate requires previous/next node links to be reciprocal and to name the immediate canonical-order neighbor or null at the corresponding boundary. A violation blocks index assembly and activation, so runtime traversal never relies on a recursion-depth limit to contain malformed structure. Chunk parent edges must likewise point to a lower chunk `canonical_order`; chunk previous/next links must be reciprocal immediate-order neighbors, which makes the optional chunk hierarchy acyclic and its sequence deterministic.
 
@@ -643,7 +800,7 @@ Release validation reconstructs each chunk's `original_text` by sorting its `chu
 
 Release validation also derives source provenance rather than trusting stored page numbers. It independently requires every document page count and stored or derived page number to lie in `1..2,147,483,647`, then recomputes each non-empty node's exact non-overlapping page-span partition before using it; every mapping page must also be within `1..documents.source_page_count`. For each chunk, the validator computes the minimum and maximum mappings intersecting its `chunk_nodes` member spans and requires its sole `sources` row to store exactly those page values. Evidence bounding boxes are projected only from those intersecting mappings, in page and mapping order, and must lie on pages within that derived span. A missing, overlapping, duplicate, gapped, or out-of-order mapping; an out-of-range page or box; or any stored-versus-derived source span mismatch blocks index assembly and activation.
 
-Release validation also enforces exact-key determinism and byte-complete subtree coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. For this check, a retrievable node has non-empty source-faithful `original_text`, including any serialized table-cell text; an empty structural anchor is contextual rather than a retrievable chunk member and derives any displayed page context from covered descendants rather than owning a zero-length page-span row. For each addressable clause, its covering set is every distinct chunk that has at least one membership in that clause's retrievable subtree and whose every retrievable member belongs to that subtree; a chunk that also contains text from outside the requested subtree cannot satisfy or appear in exact lookup for that clause. The covering set must be non-empty. For every retrievable subtree node, the validator sorts and merges all member intervals contributed by that covering set and requires their union to equal exactly the full half-open UTF-8 byte interval `[0, byte_length(nodes.original_text))`; overlaps from whole-table and row representations are allowed, but a missing prefix, interior gap, or missing suffix blocks release. An addressable structural root whose own `original_text` is empty needs no zero-length direct membership; byte-complete descendant coverage satisfies the clause and supplies its contextual page range. An addressable subtree with no retrievable self or descendant content remains invalid. A recursive coverage query reports the clause, node, every uncovered byte interval, and every otherwise selected chunk with an out-of-subtree member; any duplicate normalized key, empty covering set, contentless addressable subtree, byte-incomplete retrievable descendant, or exact-lookup chunk leaking outside the subtree is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
+Release validation also enforces exact-key determinism and byte-complete subtree coverage. Every non-null clause number must already be in canonical normalized form, and the partial unique key rejects two addressable nodes with the same `(document_id, clause_number)`. For this check, a retrievable node has non-empty source-faithful `original_text`, including any serialized table-cell text; an empty structural anchor is contextual rather than a retrievable chunk member and derives any displayed page context from covered descendants rather than owning a zero-length page-span row. For each addressable clause, its exact-lookup set is every distinct chunk that has at least one membership in that clause's retrievable subtree and whose every retrievable member belongs to that subtree; a chunk that also contains text from outside the requested subtree cannot satisfy or appear in exact lookup for that clause. The exact-lookup set must be non-empty. For every retrievable subtree node, the validator sorts and merges all member intervals contributed by that set and requires their union to equal exactly the full half-open UTF-8 byte interval `[0, byte_length(nodes.original_text))`; overlaps from whole-table, whole-clause, atomic, and row representations are allowed and retained, but a missing prefix, interior gap, or missing suffix blocks release. An addressable structural root whose own `original_text` is empty needs no zero-length direct membership; byte-complete descendant coverage satisfies the clause and supplies its contextual page range. An addressable subtree with no retrievable self or descendant content remains invalid. A recursive coverage query reports the clause, node, every uncovered byte interval, and every otherwise selected chunk with an out-of-subtree member; any duplicate normalized key, empty exact-lookup set, contentless addressable subtree, byte-incomplete retrievable descendant, or exact-lookup chunk leaking outside the subtree is a blocking catalog invariant before index assembly or activation. Together with chunk-to-source totality and chunk-text reconstruction, this guarantees that an existing clause resolves one subtree and can always produce the non-empty, complete, source-faithful `get_clause` result required by Section 22.
 
 Jurisdictions, disciplines, chunk-node membership, and other multivalued query fields use normalized link tables, not delimiter-encoded strings.
 
@@ -805,6 +962,8 @@ exact lookup
 
 The public mode enum is `auto`, `exact`, `hybrid`, and `high_accuracy`. The runtime may select a mode automatically, but the API must allow an explicit mode override. `auto` selects only among capabilities present in both the installed runtime and the active release. If dense retrieval or reranking is unavailable, `auto` returns the best available result with a typed `retrieval_capability_unavailable` warning; an explicit unavailable mode fails with `feature_unavailable` rather than silently degrading.
 
+Context correctness is independent of the candidate-selection accelerator. After seeds are selected, `exact`, `hybrid`, and `high_accuracy` all run the required-context closure in Section 19; an implementation cannot omit an applicability condition or exception merely because a faster mode was requested. `high_accuracy` additionally enables supporting context. Diagnostic context is returned only by an explicit diagnostic `get_context` request and never enters an ordinary answer silently. `auto` inherits the context profile of the concrete mode it resolves to, and the resolved mode is recorded in assembly lineage.
+
 ---
 
 ## 18. Candidate fusion and reranking
@@ -842,24 +1001,168 @@ After retrieval, ClauseSift should inspect document structure and attach require
 - referenced tables;
 - linked clauses;
 - normative appendices;
-- previous or next logical units where required.
+- immediate previous or next logical units for explicit diagnostic inspection.
 
-Context expansion is structure-driven rather than a fixed previous/next chunk window.
-
-Example rule:
+Context expansion is structure-driven rather than a fixed previous/next chunk window. It is one deterministic traversal over the release-validated Evidence Graph, not arbitrary neighborhood expansion or LLM reasoning:
 
 ```text
-retrieved requirement
-    → include clause heading
-    → inspect parent applicability condition
-    → include sibling exception
-    → include referenced table
-    → resolve directly referenced clause
+ranked source/chunk candidates
+    -> every ordered canonical member node becomes a seed
+    -> apply versioned node/relation traversal rules
+    -> close required context, then consider optional context
+    -> materialize target nodes as source-backed evidence
+    -> deduplicate and order the bounded evidence subgraph
+    -> attach every accepted path, uncertainty, and warning
+    -> serialize one Evidence Package
 ```
+
+### 19.1 Context classes and profiles
+
+Every rule has one context class:
+
+1. **required** — omission can change scope, applicability, normative meaning, a value, or the subject of an exception;
+2. **supporting** — useful corroboration or navigation that is not required to interpret the seed correctly;
+3. **diagnostic** — adjacency, version history, or other inspection material that is useful for review but must not be mistaken for answer evidence.
+
+Required closure runs for every ordinary evidence-returning search or exact-clause operation. Hybrid and exact search stop after required closure. High-accuracy search runs required and supporting rules. `get_context` accepts the closed `context_level` enum `required`, `supporting`, or `diagnostic`; each value includes all preceding levels and defaults to `supporting`. Its relation-class include flags may intentionally narrow this explicit inspection request, but they do not alter automatic required closure on the original search or clause result. Diagnostic context is never enabled merely by an installation option or latency heuristic.
+
+Every admitted release records `edge_identity_schema_version`, `occurrence_identity_schema_version`, `context_rule_set_version`, a canonical context-configuration hash, the exact Section 12.2 evidence-vocabulary version/hash, the relation-type rank, and the limits below. Changing any value changes `build_content_id` and `release_id`. The rule set is executable configuration owned by ClauseSift and validated against the evaluation corpus; callers cannot upload rules or a graph query. A model may rank the already retrieved candidates, but it cannot add a traversal edge, change a context class, or decide that required context is unnecessary.
+
+### 19.2 Initial traversal rules
+
+The v0.1 rule set is closed. “Forward” and “reverse” use the canonical directions in Section 20, never query-relative naming.
+
+| Seed or accepted node | Edge and direction | Class | Target and stop semantics |
+| --- | --- | --- | --- |
+| `requirement`, `clause`, `subclause`, `paragraph`, `table_row`, or `exception` | `applies_subject_to` forward | required | Include every uniquely resolved applicability target whose node type is admitted by Section 20.1. Apply required rules recursively to the target. |
+| `requirement`, `clause`, `subclause`, `paragraph`, `table_row`, or `exception` | `depends_on` forward | required | Include every uniquely resolved definition, requirement, clause, subclause, table, or document dependency. Apply required rules recursively. A definition required by actual term use must be compiled as this edge; runtime reverse-scanning of all `defines` scopes is forbidden. |
+| `requirement`, `clause`, `subclause`, `paragraph`, or `table_row` | `exception_to` reverse | required | Include every exception that explicitly limits the node. Apply the exception rule below; sibling position alone never creates an exception. |
+| `exception` | `exception_to` forward | required | Include the exact affected source-bearing node and stop this relation after that target; the exception's other required rules, including forward `applies_subject_to` and `depends_on`, still execute. Cycles are release-invalid. |
+| `definition` | `defines` forward | required | Include the exact governing scope so the definition is not presented as globally applicable. Stop this rule after that target. |
+| `table_row` | `contains` reverse | required | Include the containing table and nearest addressable clause. The table projection must preserve title, headers, and units. Stop at that clause; do not attach unrelated rows. |
+| `note` or `footnote` | `contains` reverse | required | Include the nearest source-bearing parent that the annotation qualifies. Preserve the note/footnote's own Section 12.2 normative status and modality; attachment never promotes either value. |
+| Any source-bearing seed or required node | `references` forward | supporting | Include each uniquely resolved direct target once. Do not recursively follow another `references` edge in an ordinary profile. Use `depends_on` when the target is required to complete meaning. |
+| Any source-bearing seed or required node | `contains` reverse | supporting | Include non-empty structural ancestors through the nearest addressable clause and retain the complete heading path as metadata. Applicability text needed for correctness must also have `applies_subject_to`; hierarchy alone is not enough. |
+| Any source-bearing seed or required node | directly contained `note`, `footnote`, or table reached by `contains` forward | supporting | Include only direct children whose type matches the rule. Exceptions require `exception_to`; a child relation alone cannot classify them as applicable. |
+| A document root, or an exact release-validated version-edge endpoint projected from a seed | `supersedes` or `amends` forward from the newer/amending root or reverse from the exact older/amended target | supporting with version-comparison intent; otherwise diagnostic | Include only the exact resolved endpoint through the standard source-bearing or metadata-only materialization branch and stop. Preserve its edition and status; never replace the seed or copy a same-number clause from another edition. |
+| Any node | `precedes` forward or validated inverse | diagnostic | At most one immediate neighbor in each requested direction; adjacency never supplies required scope or an exception. |
+| A definition-scope seed with no compiled term dependency | `defines` reverse | diagnostic | Show scoped definitions for inspection only. Ordinary search cannot infer that every definition in scope is required. |
+
+A normative appendix follows the same typed rules as any other scope: a `depends_on` or `applies_subject_to` edge can make it required, a direct `references` edge makes it supporting, and containment or physical adjacency alone does not. An informative or unknown appendix, note, or footnote retains its exact source status in every attached item and citation. An `unclassified` node can participate only in structural containment/sequence and an independently resolved generic `references` edge; it cannot satisfy a rule whose endpoint requires requirement, exception, definition, note, table, or other semantic type. Encountering an admitted `release_tier: standard` `unclassified`/`unknown` node emits `classification_unresolved`. When the unresolved field is needed to decide or execute a required rule, the result also sets `context_completeness: "incomplete_required"`; it never treats the missing classification as proof that no required context exists.
+
+Only release-validated structural edges and resolved semantic edges are navigable. A non-resolved occurrence is never followed or matched by document code, edition label, clause number, text similarity, or “latest” status. If that occurrence belongs to a rule that would be required, the result remains source-faithful but marks `context_completeness: "incomplete_required"` and emits `context_incomplete` plus `cross_reference_unresolved`; a `release_tier: critical` document would already have failed release admission. A non-resolved optional occurrence emits `cross_reference_unresolved` only when its relation class was requested. A table-row seed whose validated structure cannot supply its table title, headers, units, and affected clause similarly remains visible but is `incomplete_required` and propagates `table_structure_anomaly`; no header or unit is inferred. v0.1 has no probabilistic navigable relation. Parser/OCR uncertainty on the nodes or occurrences used by a validated edge propagates through Section 7.2 warnings; a future low-confidence edge type requires a versioned policy and is non-navigable until then.
+
+### 19.3 Traversal algorithm, materialization, and bounds
+
+The runtime creates one seed record for every member node of every directly returned source chunk, preserving final candidate rank, source ID, and `chunk_nodes.member_order`. It processes a priority queue in this total order:
+
+```text
+(context-class rank,
+ seed final rank,
+ seed source_id,
+ path length,
+ ordered relation-type ranks,
+ target document_id,
+ target node canonical_order,
+ ordered edge IDs)
+```
+
+Required candidates are therefore exhausted before supporting or diagnostic candidates. Every queue entry carries its originating seed, context class, complete ordered edge/node prefix, and current target. The traversal deduplicates only the exact path state `(seed_source_id, context_class, ordered edge-ID sequence, current target_document_id, current target_node_id)`; materialized objects may still deduplicate by source or node identity and merge their paths. A later arrival at an already materialized target through a different context class or edge prefix is a distinct path state and expands that target's eligible outgoing rules with its own prefix. Thus both arms of `A -> B1 -> C` and `A -> B2 -> C` propagate through `C -> D`, and `D` retains both complete paths. There is no target-only visited set.
+
+Path-local edge/node tracking prevents recursion: encountering an allowed `references` or `depends_on` cycle records the finite path up to the first repeated node, does not enqueue the repeated step, and emits one deterministically keyed `context_cycle_detected` warning. Structural, governing, amendment, or supersession cycles never reach runtime because release validation rejects them. The semantic-depth, per-object path, total-step, object, and byte bounds apply while path states are enqueued; exceeding a required bound returns `context_limit_exceeded`, while an optional path is truncated only under the deterministic policy below. These bounds contain reconvergent simple-path growth without discarding an in-bound independent prefix.
+
+“Required closure” is the least fixed point of required typed traversal and Section 20.3 material-conflict closure. After the required graph queue drains, conflicts sort by `conflict_id`; positions sort by `position_order`; and each position's compiled cover sources sort by `conflict_position_sources.selection_order` then `source_id`. Every cover source not already materialized enters the required graph queue with a deterministic key after the source that triggered the conflict. The runtime repeats until neither phase adds a source or record, deduplicating materialized objects by release-scoped source/conflict ID while retaining the independent path/reason records. Only then may supporting traversal begin. Conflict records are not graph edges and do not consume semantic path depth, but their added sources, reasons, positions, and complete source bytes consume the explicit bounds below. This fixed point ensures that a conflict side cannot arrive without its own applicability/exception context and that a newly attached side cannot hide another admitted material conflict.
+
+An accepted source-bearing target is materialized as source-backed Evidence Package items rather than generated text. The versioned rule declares its evidence scope as an ordered set of node-qualified intervals `(node canonical_order, node_id, node_text_start, node_text_end)`, never one flat byte range: semantic references to an addressable clause/subclause use every retrievable node interval in the byte-complete subtree defined in Section 14.1; atomic requirements, definitions, exceptions, notes, footnotes, and rows use their exact node interval; table context uses its validated whole-table representation; and source-bearing structural ancestors use only their own non-empty source interval. A source is eligible for that target only when every membership interval contributing to its chunk lies within an interval for the same node in the declared scope; its complete `original_text` is therefore reconstructed only from in-scope source spans and their declared separator. A source already selected for another seed or target satisfies the new target only when it passes this same containment test; a broader source remains independently valid but neither receives the narrower target's inclusion path nor suppresses its scope-contained cover.
+
+The deterministic materialization cover maintains covered intervals separately for each scoped node and finds the lexicographically first uncovered coordinate `(node canonical_order, node_id, byte offset)`. It considers only eligible memberships for that same `node_id` satisfying `node_text_start <= byte offset < node_text_end`, selects the one with greatest `node_text_end`, breaks ties by `(chunk-kind rank, chunk canonical_order, chunk_id)`, adds every in-scope membership of that selected source to the corresponding node-qualified coverage sets, and repeats. The release validator runs the identical algorithm. Node-local offset zero in one subtree node can therefore never cover offset zero in another. Consequently, a multi-node chunk containing an atomic target plus any neighboring requirement, exception, definition, note, footnote, or row cannot materialize that atomic target.
+
+An accepted structural target with empty `original_text` instead becomes one strict metadata-only Section 21 `context_targets` record. This includes an empty document root reached by `depends_on`, `references`, amendment/version traversal, or applicability traversal and an empty part/chapter/section/clause/subclause/appendix reached as a governing or structural scope. The record carries safe catalog/manifest projections and every accepted path but no `source_id`, invented text, source coordinates, citation, or Evidence Lineage source object. Therefore every required accepted edge has a serializable terminal object. Omitting that record, its path, or its exact target metadata makes required context incomplete and prevents a `complete` result. Release validation executes both materialization branches for every node eligible under a required rule and blocks a release when a source-bearing target has an incomplete scope-contained cover or any eligible empty target lacks the metadata projection; table-kind ranking prefers the whole-table representation needed to preserve headers and units. A source eligible for several seeds or targets appears once by `source_id`, and a metadata target appears once by `(document_id, node_id)`; each retains every unique lineage path. Overlapping sources required by different scopes remain separate. Direct seeds precede expanded evidence items within `evidence`; expanded items and metadata targets independently sort by their smallest applicable queue tuple and then `source_id` or `(document_id, node_id)`.
+
+The schema-validated v0.1 defaults are:
+
+| Bound | Default and enforcement |
+| --- | --- |
+| Structural path depth | 64 edges. Release validation rejects any tree or required materialization path that would exceed it. |
+| Required semantic path depth | 8 edges per seed. Exceeding it is `context_limit_exceeded`; required evidence is never truncated. |
+| Optional semantic path depth | 1 for supporting and 2 for diagnostic traversal. A second ordinary `references` hop is diagnostic only. |
+| Expanded context objects | 128 total unique objects per request, combining source-backed evidence items and metadata-only context targets, in addition to direct seeds. |
+| Paths per returned context object | 32 unique paths. |
+| Total accepted path steps | 1,024 per request. |
+| Material conflict records | 64 per request, with at most 16 positions per record and 256 positions total. |
+| Conflict position spans and inclusion reasons | 1,024 of each per request. |
+
+The complete output must also satisfy the Section 22 frame-size bound. Before traversal, release validation proves that the largest single required graph-and-conflict closure addressable by `get_clause` fits every depth/item/path/step/conflict/position/reason/byte bound. At runtime, if required closure from several search seeds would exceed any bound, the server returns `context_limit_exceeded` as one tool error and publishes no partial Evidence Package. Optional traversal stops immediately before the first over-limit candidate in priority order, keeps the complete required closure, sets `context_completeness: "truncated_optional"`, and emits `context_truncated` with safe configured/observed counts. Thus resource pressure can remove optional context visibly but can never silently remove required or material conflict context.
+
+Every source and target remains bound to its exact `document_id`, edition, and status. Traversal never joins on a human clause label. An explicit cross-document edge may attach a superseded or withdrawn target, but its source-backed evidence item or metadata-only context target preserves that status and emits `context_status_boundary` unless the query has explicit version-comparison intent. A candidate already from a non-active document likewise remains visible with that warning; the runtime never substitutes an active edition. Multiple seeds whose closures overlap deduplicate only the identical release-scoped source ID or `(document_id, node_id)` metadata identity, not similar text or clause numbers.
+
+### 19.4 Worked traversal examples
+
+**Scope and exception.** A retrieved requirement `R` has `R --applies_subject_to--> S`, while exception `E --exception_to--> R` and `E --applies_subject_to--> C`. Required closure returns `R` as `retrieval_seed`, then `S`, `E`, and the condition node `C` as `expanded_context`. Their lineage paths record the forward requirement-applicability step, reverse exception step, and forward exception-applicability step respectively. An unresolved required `applies_subject_to` occurrence produces no guessed target; the package is explicitly `incomplete_required`.
+
+**Table row.** A row node `TR` is retrieved. Reverse `contains` reaches its table `T` and nearest addressable clause `C`. The deterministic context cover selects the whole-table representation containing the title, header cells, units, and row, and attaches `C` when it has source text. Other table rows are not individually expanded merely because they are siblings. The row remains the direct seed and table/clause sources retain required traversal paths.
+
+**Cross-reference.** Requirement `A` is incomplete without clause `B`, so the builder emits `A --depends_on--> B`, not an ordinary citation. Required closure includes exact target `B` in its manifested edition and evaluates `B`'s required applicability/dependency rules up to the semantic-depth bound. A plain `A --references--> B` is supporting, follows one hop only in high-accuracy mode, and never follows `B --references--> C` unless an explicit diagnostic request enables the second hop. If another edition also has clause `B`, it is irrelevant unless the stored edge targets that exact document ID.
+
+**Empty governing scope.** Definition `D --defines--> S` targets an empty section node. Required closure returns `D` as source-backed evidence and one `context_targets` record for `S` containing the exact document/node identity, structural metadata, and the forward `defines` path from `D`. It returns no fabricated source item for `S`, and cannot report complete context if the record or path is missing.
 
 ---
 
-## 20. Cross-reference model
+## 20. Evidence Graph relationship model
+
+### 20.1 Canonical relationship contract
+
+Evidence Graph relationships are either **structural** edges derived from the validated canonical document model or **semantic** edges whose meaning is source-grounded and relation-specific. Each canonical name has one direction and one meaning across parsers, storage adapters, traversal code, reports, and public evidence. Every endpoint category below uses the exact Section 12.2 node-type vocabulary; an `unclassified` node never satisfies a more specific category. Storage may use foreign keys, relation rows, or derived views; those representations must expose the same logical edges.
+
+The canonical structural relations are:
+
+| Relation | Canonical direction and cardinality | Origin, traversal, and cycle policy |
+| --- | --- | --- |
+| `contains` | Immediate parent node → immediate child node. Every non-root canonical node has exactly one incoming `contains`; a parent may have zero or more ordered children. | Derived from `child.parent_node_id`. Ancestor and child traversal is eligible when a tool requests that context. The relation must form the one rooted tree validated in Section 14.1. |
+| `precedes` | Canonical node → its immediate next canonical node in the same document. A node has at most one incoming and one outgoing edge; `previous_node_id` is the validated inverse lookup, not a second relation type. | Derived from reciprocal previous/next fields and canonical order. Optional bounded adjacency traversal may use it. Edges always increase canonical order, so cycles are invalid. |
+
+Chunk parent/sequence links and chunk-to-node membership remain retrieval/projection structure rather than additional canonical Evidence Graph node relations. Notes, exceptions, tables, and appendices obtain their ordinary attachment from `contains`; a semantic edge is added only when its distinct meaning changes validation or traversal behavior.
+
+The initial semantic relations are deliberately limited to the existing vocabulary:
+
+| Relation | Canonical source → target | Cross-document and resolution rule | Origin, context eligibility, and cycle policy |
+| --- | --- | --- | --- |
+| `references` | Any source-bearing node → an addressable node or document root explicitly cited by the source. | Allowed. A navigable edge exists only after unique resolution. An absent or ambiguous target remains an unresolved occurrence with no edge. | `source_text`; eligible only for requested direct-reference context. Cycles are allowed because source documents may cite each other, but traversal is bounded and uses path-local cycle detection. |
+| `depends_on` | A requirement, clause, subclause, paragraph, table row, or exception → the requirement, clause, subclause, definition, table, or document on which its interpretation, satisfaction, or effect explicitly depends. | Allowed only for an explicit, uniquely resolved dependency. | `source_text` or `manifest`; eligible for required dependency/applicability context, including dependencies needed to interpret an exception. Source-grounded cycles may be retained with a warning, but never authorize recursive unbounded traversal. |
+| `exception_to` | An `exception` node → the requirement, clause, subclause, paragraph, or table row whose effect it limits. | Same-document by default; cross-document only when an explicit citation resolves uniquely. | `source_text`; runtime finds exceptions from the target by reverse traversal when requested. Self-edges and `exception_to` cycles are invalid. |
+| `defines` | A `definition` node → the document, part, chapter, section, clause, subclause, or appendix scope whose terminology it governs. | Same-document by default; an external definition uses `references` or `depends_on` unless the source explicitly declares cross-document scope and resolves uniquely. | `source_text`; eligible by reverse lookup from a seed within the governed scope. Self-edges and `defines` cycles are invalid. |
+| `supersedes` | A newer document root → each older document root it replaces. A source-text occurrence may be anchored in a different source-bearing node of the newer document, but that evidence anchor is not the logical edge source. | Cross-document by definition. Both editions remain distinct release nodes; an unavailable or ambiguous older edition creates no navigable edge. | Human-reviewed `manifest` authority. Extracted text is only a proposed occurrence until reconciled to the exact manifested root-to-root edge. Not default answer context; eligible for explicit version work. Self-edges and cycles are invalid. |
+| `amends` | An amending document root → the document root or addressable node it changes. A source-text phrase in any source-bearing descendant is anchored there but projects to the sole amending document root as its logical source. | Cross-document allowed and requires unique target resolution. | Human-reviewed `manifest` authority. Extracted text is only a proposed occurrence until reconciled to the exact manifested source-root, relation type, target document, and target node. Eligible for explicit version work. Self-edges and cycles in the amendment/supersession subgraph are invalid. |
+| `applies_subject_to` | A governed requirement, clause, subclause, paragraph, table row, or exception → an explicit applicability target of canonical type `document`, `part`, `chapter`, `section`, `clause`, `subclause`, `paragraph`, `requirement`, `exception`, `table`, `table_row`, or `appendix`. | The target must contain or represent the source-grounded applicability qualifier. Cross-document only for an explicit, uniquely resolved target. `condition` is a semantic description, not a node-type token. | `source_text` or `manifest`; eligible for required applicability context, including qualifiers that limit an exception. Self-edges and same-relation cycles are invalid. |
+
+For example, direction never changes with the query:
+
+```text
+exception node --exception_to--> affected requirement
+governed requirement --applies_subject_to--> applicability condition
+citing clause --references--> cited clause
+new document root --supersedes--> old document root
+```
+
+`relation_origin` is the closed v0.1 enum `structural`, `source_text`, or `manifest`. Structural relations are derived rather than stored as cross-reference occurrences. v0.1 admits no generated/probabilistic semantic edge. A future generated candidate requires a schema/vocabulary version change, explicit generator identity and confidence, review policy, and a non-authoritative state; it cannot become navigable merely because a model emitted it.
+
+Every navigable structural or semantic edge has one implementation-independent `edge_id`. Under `edge_identity_schema_version: "edge-id.v1"`, the builder creates the strict canonical object `{edge_identity_schema_version, relation_type, source_document_id, source_node_id, target_document_id, target_node_id}` in the relation's canonical direction, serializes it with RFC 8785, and hashes the ASCII domain `clausesift.edge-id.v1` followed by one zero byte and those canonical UTF-8 bytes. The public ID is `edge-sha256-` plus the 64 lowercase hexadecimal SHA-256 characters. It is therefore a 76-character token satisfying the public opaque-ID grammar. A future schema version uses a new version value and domain string rather than silently reinterpreting an old ID.
+
+For `contains` and `precedes`, the identity fields come directly from the release-validated node ownership/sequence relations. For a semantic relation, they are exactly the normalized logical edge tuple after unique resolution; occurrence IDs, origins, evidence anchors, and spans are provenance and are deliberately excluded from logical edge identity. Repeated citations with that tuple—including citations supported by both `source_text` and `manifest`—normalize to one runtime edge whose provenance contains every occurrence, while an unresolved occurrence has no edge or `edge_id`. Mixed origins never require choosing a winning scalar origin. The relationship artifact exposes the derived IDs and complete occurrence provenance for semantic edges, and structural IDs remain deterministic derived views. The builder, release validator, startup validator, and central lineage serializer independently recompute every ID, reject a value with the wrong prefix/digest or an identity collision, and require every serialized path step to match the recomputed ID, endpoints, and occurrence provenance. The edge-identity schema version is a cross-reference/context cache input and a release-manifest/build-identity field.
+
+Every semantic occurrence, resolved or not, has one implementation-independent `cross_reference_id`. Under `occurrence_identity_schema_version: "xref-id.v1"`, the builder creates the strict canonical object `{occurrence_identity_schema_version, relation_origin, relation_type, source_document_id, source_node_id, occurrence_node_id, source_text_start, source_text_end, raw_reference_text_sha256, target_text_start, target_text_end, target_text_sha256, target_selector_kind, parsed_target_document_code, parsed_target_edition, parsed_target_clause, target_selector_rule_id, target_selector_input_sha256, manifest_relation_entry_sha256}` with the conditional values defined in Section 20.2, serializes it with RFC 8785, and hashes the ASCII domain `clausesift.xref-id.v1` followed by one zero byte and those canonical UTF-8 bytes. The public ID is `xref-sha256-` plus the 64 lowercase hexadecimal SHA-256 characters. It is a 76-character opaque token. Dense `explicit_target_ordinal`, resolution status, selector candidate/provenance output, proposed/resolved target IDs, and edge ID are deliberately excluded, so inserting another extracted target or changing the release catalogue can change ordering/resolution without renaming an otherwise unchanged source/manifest occurrence.
+
+The relationship builder and independent release validator recompute every occurrence object, ID, conditional null, source/target token hash, deterministic target order, and manifest-entry hash; a malformed prefix/digest, duplicate identity, or identity collision blocks release. The occurrence-identity schema version is a cross-reference/context cache input and a release-manifest/build/lineage field. A future version uses a new value and domain rather than reinterpreting v1.
+
+Every path step has a required `origin_groups` array of strict `{relation_origin, occurrence_ids}` objects in the fixed origin order `structural`, `source_text`, `manifest`. A structural edge has exactly one `structural` group with an empty occurrence array. A semantic edge has no structural group and has exactly one group for each origin present among its resolved supporting occurrences; each such group is non-empty, its occurrence IDs are unique and sorted lexicographically, and the groups' disjoint union equals the complete occurrence set normalized into that edge. A missing, extra, duplicate, empty semantic, or out-of-order group/occurrence; an occurrence assigned to the wrong origin or edge; or the obsolete scalar `relation_origin`/top-level `occurrence_ids` step shape fails closed.
+
+Every source occurrence is retained with its own stable occurrence ID and source evidence. If source text explicitly enumerates several targets, the builder emits one occurrence per explicit target and one edge per resolved target; their exact target-token spans, deterministic ordinals, and selector inputs distinguish their occurrence IDs even when they share one surrounding reference phrase. A phrase with several candidate interpretations is one ambiguous occurrence with no edge, not a multi-target guess.
+
+Release validation enforces the endpoint matrix, origin policy, target ownership, semantic identity, and cycle rules above. A semantic self-edge is rejected except where `references` or `depends_on` faithfully records an explicit source statement; those allowed cycles remain bounded at traversal. Structural hierarchy cycles always block release. Relation vocabulary additions require a schema and vocabulary version change; unknown relation names fail visibly rather than being mapped to the nearest known type.
+
+Section 19 is the sole authority for automatic traversal class, direction, recursion, and materialization. Relation type constrains meaning but does not by itself authorize arbitrary expansion: in particular, ordinary `references` is supporting, semantic incompleteness is represented by `depends_on`, an applicable exception is found by reverse `exception_to`, and `supersedes`/`amends` require deterministic version intent for supporting traversal. The release validator executes that exact rule set against these canonical directions.
+
+### 20.2 Cross-reference extraction and resolution
 
 The build pipeline should detect deterministic references such as:
 
@@ -872,57 +1175,171 @@ Persisted fields:
 
 ```text
 cross_reference_id
-source_node_id
 source_document_id
+source_node_id
+occurrence_node_id
+source_text_start
+source_text_end
+target_text_start
+target_text_end
+explicit_target_ordinal
+target_selector_input_sha256
+manifest_relation_entry_sha256
 parsed_target_document_code
 parsed_target_edition
 parsed_target_clause
+target_selector_kind
+proposed_target_node_id
+target_selector_rule_id
+target_selector_provenance
+target_selector_provenance_sha256
 target_document_id
 target_node_id
 relation_type
+relation_origin
 resolution_status
 raw_reference_text
 ```
 
-The parsed target fields are null only when the reference grammar omits that component and otherwise contain its canonical normalized value. `source_edition` and the `target_document_code`, `target_edition`, and `target_clause` values exposed to reports or runtime clients are derived by joining the stored source and target IDs to `documents` and `nodes`; callers and builders cannot write those projections independently.
+`source_node_id` is always the canonical logical edge source used by the Section 20.1 endpoint matrix and `edge-id.v1`; `occurrence_node_id` is only the evidence-bearing anchor for an extracted phrase. For a `source_text` occurrence, `occurrence_node_id`, `raw_reference_text`, the half-open UTF-8 `source_text_start`/`source_text_end`, the non-empty target-token `target_text_start`/`target_text_end`, a non-negative `explicit_target_ordinal`, and `target_selector_input_sha256` are non-null; `manifest_relation_entry_sha256` is null. Both spans fall on code-point boundaries within `occurrence_node_id.original_text`, the source span selects exactly `raw_reference_text`, and the target-token span is contained within it. The identity object hashes both exact slices in canonical `sha256:<64-lowercase-hex>` form.
 
-The base row stores `source_document_id` and `source_node_id`, with ownership enforced by their composite foreign key. A resolved reference stores only the release-scoped `target_document_id` and `target_node_id`; document code, edition, and clause projections alone are not stable join keys. Resolution is deterministic:
+The selector-input hash covers the RFC 8785 strict extraction-time selector request before candidate enumeration. Its kind-specific schema contains `selector_input_schema_version`, target-selector kind, conditional rule ID, normalized parsed target fields, exact target-token span/hash, and any rule-specific source-derived target label or range member needed to distinguish the requested canonical node; it contains no proposed/resolved target ID, candidate list, or release-catalogue fact. Built-in `document_root` and `addressable_clause` schemas admit no extra discriminator; each allowlisted `canonical_node` rule defines and versions its closed discriminator schema. Targets sharing one source span receive dense zero-based ordinals after sorting by `(target_text_start, target_text_end, target_selector_input_sha256)`; compact ranges sharing one token expand in that canonical selector-input-hash order. Duplicate selector-input hashes at one token are rejected rather than assigned arbitrary ordinals.
 
-1. a same-document reference uses the source `document_id`;
-2. an external reference naming a document code and edition requires exactly one catalogue match for that pair;
-3. an unqualified external document code uses the source manifest's human-reviewed `reference_edition_overrides` mapping when present, and the mapped `document_id` must exist in the release and match that code;
-4. without an override, an unqualified external code resolves only when exactly one release document has that code.
+For a `manifest` occurrence, `occurrence_node_id`, both source and target span pairs, `explicit_target_ordinal`, `target_selector_input_sha256`, `raw_reference_text`, and their identity-object hashes are null. `manifest_relation_entry_sha256` is non-null and equals the SHA-256 of the exact RFC 8785 `manifest-relation.v1` entry defined in Section 10.3. The entry's source selector deterministically supplies `source_node_id`; its exact target document ID is an immutable resolution input, and its target selector supplies `target_selector_kind` plus nullable `parsed_target_clause`. `parsed_target_document_code` and `parsed_target_edition` are null because the entry identifies the document by ID. Duplicate canonical relation entries in one source manifest are invalid. The entry hash changes only when that semantic relation entry changes; unrelated manifest fields, relation-array order, and raw YAML formatting do not rename the occurrence. For source-text rows, parsed document, edition, and clause fields are null only when the grammar omits that component and otherwise contain its canonical normalized value. `source_edition` and the `target_document_code`, `target_edition`, and `target_clause` values exposed to reports or runtime clients are derived by joining the stored source and target IDs to `documents` and `nodes`; callers and builders cannot write those projections independently.
 
-Multiple eligible documents produce `ambiguous_edition`; no eligible document produces `unresolved_document`; and an eligible document without the referenced clause produces `unresolved_clause`. None of these conditions may silently select the newest or active edition. The manifest schema defines `reference_edition_overrides` as a mapping from normalized external document code to an immutable target `document_id`; it is covered by manifest approval and release validation.
+Both source-node fields, when present, belong to `source_document_id` through separate composite foreign keys. For every source-text relation except `supersedes` and `amends`, `source_node_id` must equal `occurrence_node_id` and that node must satisfy the relation's source category. Every source-text `supersedes` or `amends` proposal deterministically uses the source document's sole root as `source_node_id` regardless of which source-bearing node contains the phrase. A manifest row uses the node selected by its entry's exact source selector; a supersession or amendment entry therefore uses the same root endpoint. Release validation recomputes these projections from the immutable tree and approved manifest, and rejects a missing anchor, cross-document anchor, non-source-bearing anchor, non-root version-edge source, wrong manifest-selected source, or occurrence slice mismatch. A resolved reference stores only the release-scoped `target_document_id` and `target_node_id`; document code, edition, and clause projections alone are not stable join keys. Document resolution is deterministic:
 
-The initial `resolution_status` enum is `resolved`, `unresolved_document`, `ambiguous_edition`, and `unresolved_clause`. Same-document references inherit the source `document_id`. `resolved` requires both target IDs. When `parsed_target_clause` is present, the target must be the unique addressable node in the resolved document whose normalized `clause_number` equals it; when the grammar names only a document, the target node must be that document's sole root. Release validation reruns the deterministic four-step resolver from the immutable parsed fields, approved overrides, and candidate release catalog and requires the stored `resolution_status`, `target_document_id`, and `target_node_id` to equal its result exactly. For a `resolved` result only, every non-null parsed document code and edition must equal the selected joined document values. Every non-resolved result instead requires both target IDs and all joined target projections to be null; its non-null parsed fields remain normalized extraction evidence and are not compared with nonexistent joined values. An existing but different node, a writable code/edition projection, joined target data on an unresolved result, or target IDs attached to an unresolved result blocks index assembly and activation.
+1. a manifest relation entry selects its exact `target_document_id`, which must exist in the release and cannot be replaced by status or edition heuristics;
+2. a same-document source-text reference uses the source `document_id`;
+3. an external source-text reference naming a document code and edition requires exactly one catalogue match for that pair;
+4. an unqualified external source-text document code uses the source manifest's human-reviewed `reference_edition_overrides` mapping when present, and the mapped `document_id` must exist in the release and match that code;
+5. without an override, an unqualified external source-text code resolves only when exactly one release document has that code.
+
+Multiple eligible documents produce `ambiguous_edition`; no eligible document produces `unresolved_document`. Neither condition may silently select the newest or active edition. The manifest schema defines `reference_edition_overrides` as a mapping from normalized external document code to an immutable target `document_id`; it is covered by manifest approval and release validation.
+
+After selecting a document, the closed `target_selector_kind` chooses exactly one node-resolution rule:
+
+- `document_root` requires `parsed_target_clause`, `proposed_target_node_id`, and every selector-rule/provenance field to be null and selects that document's sole root;
+- `addressable_clause` requires a non-null `parsed_target_clause`, null `proposed_target_node_id`, and null selector-rule/provenance fields, and selects the unique addressable node whose normalized `clause_number` equals it;
+- `canonical_node` requires non-null selector-rule/provenance fields. `parsed_target_clause` may additionally scope the target. A resolved result requires a non-null `proposed_target_node_id`; a missing or ambiguous candidate requires it to be null. The proposal is an immutable resolver input, not the resolved `target_node_id` copied early.
+
+A `canonical_node` selector is admitted in v0.1 only for a deterministic `source_text` rule. Its strict canonical provenance object contains the selector schema version, rule ID and version, configuration SHA-256, exact `occurrence_node_id` plus occurrence span and hash, and an ordered candidate array whose entries contain the target-node ID, target original-text hash, and ordered structural-path IDs and hash. The array has exactly one entry for a resolved proposal, zero for `unresolved_node`, and two or more for `ambiguous_node`; only the one-entry case copies that candidate ID into `proposed_target_node_id`. The separate stored SHA-256 covers the complete canonical object. The builder derives the proposal and provenance from the raw occurrence and candidate canonical tree. The release validator independently reruns the named allowlisted rule over those immutable inputs, rejects a rule/provenance/configuration mismatch, and requires the recomputed proposal and provenance to match byte-for-byte before resolving it. Merely naming an existing node is therefore insufficient. Manifest-origin relations in v0.1 may use only `document_root` or `addressable_clause`; a manifest-origin non-addressable selector is rejected pending a versioned manifest-schema contract rather than guessed.
+
+The byte-exact v1 fixture uses source text `Except as permitted by Clause 4.6.2` at node bytes `[0,35)` and its target token at `[23,35)`. Its strict selector-input object is:
+
+```json
+{
+  "selector_input_schema_version": "canonical-node-selector-input.v1",
+  "target_selector_kind": "canonical_node",
+  "target_selector_rule_id": "selector.exception-target.v1",
+  "parsed_target_document_code": null,
+  "parsed_target_edition": null,
+  "parsed_target_clause": "4.6.2",
+  "target_text_start": 23,
+  "target_text_end": 35,
+  "target_text_sha256": "sha256:d6affa424d3bc59aaa05bc1ad48ecefdf70dc195784897dfe20827edc20402a1"
+}
+```
+
+Its RFC 8785 SHA-256 is `sha256:300e5860a6d646d15825f722d4a8aab1f838a71f6d479ae77926fdd72c428ff8`. The resulting occurrence-identity object is:
+
+```json
+{
+  "occurrence_identity_schema_version": "xref-id.v1",
+  "relation_origin": "source_text",
+  "relation_type": "exception_to",
+  "source_document_id": "as-1668-1-2015",
+  "source_node_id": "node-exception-001",
+  "occurrence_node_id": "node-exception-001",
+  "source_text_start": 0,
+  "source_text_end": 35,
+  "raw_reference_text_sha256": "sha256:e4320235405f2e807354ee2d8934d9b6a895137ddb71bfde8ab518296bbf4100",
+  "target_text_start": 23,
+  "target_text_end": 35,
+  "target_text_sha256": "sha256:d6affa424d3bc59aaa05bc1ad48ecefdf70dc195784897dfe20827edc20402a1",
+  "target_selector_kind": "canonical_node",
+  "parsed_target_document_code": null,
+  "parsed_target_edition": null,
+  "parsed_target_clause": "4.6.2",
+  "target_selector_rule_id": "selector.exception-target.v1",
+  "target_selector_input_sha256": "sha256:300e5860a6d646d15825f722d4a8aab1f838a71f6d479ae77926fdd72c428ff8",
+  "manifest_relation_entry_sha256": null
+}
+```
+
+The row's separately validated `explicit_target_ordinal` is `0`. The required domain-separated result is `xref-sha256-02485de100a2940ab256703374853265ad40108fcc70592a60dd9edb91d564e4`. Tests recompute both hashes rather than treating them as arbitrary example tokens.
+
+The initial `resolution_status` enum is `resolved`, `unresolved_document`, `ambiguous_edition`, `unresolved_clause`, `unresolved_node`, and `ambiguous_node`. Same-document source-text references inherit the source `document_id`. `resolved` requires both target IDs. A missing exact manifest target document or source-text document match produces `unresolved_document`; a missing addressable clause produces `unresolved_clause`; a canonical-node rule yielding no valid endpoint produces `unresolved_node`; and one yielding several candidates produces `ambiguous_node`. A resolved canonical-node target must exist in the selected document, satisfy any clause scope and the relation's endpoint category, and equal the independently recomputed proposed ID. Release validation reruns both the deterministic five-step document resolver and the tagged node selector from the approved manifest entry or immutable parsed source-text fields, approved edition overrides, occurrence evidence, selector provenance, and candidate release catalog. It requires the stored `resolution_status`, `target_document_id`, and `target_node_id` to equal the result exactly. For a resolved source-text result only, every non-null parsed document code and edition must equal the selected joined document values; a resolved manifest result must equal its exact entry-selected document and node. Every non-resolved result instead requires both target IDs and all joined target projections to be null; its source inputs and valid selector evidence remain non-navigable occurrence evidence. A proposed node from another document, a node outside its parsed clause scope, a disallowed endpoint type, a writable code/edition projection, joined target data on an unresolved result, or target IDs attached to an unresolved result blocks index assembly and activation.
 
 Release policy is tier-specific and has no count threshold in v0.1:
 
-- for a `critical` document, every extracted cross-reference row must be `resolved`; any `unresolved_document`, `ambiguous_edition`, or `unresolved_clause` status emits a blocking `cross_reference_unresolved`, fails release validation, and requires a manifest correction, parser/resolver correction, or re-approved change of release tier before rebuilding;
-- for a `standard` document, a non-resolved status emits an advisory `cross_reference_unresolved` and may ship only when the static review report enumerates it and the unresolved row exposes no navigable target IDs.
+- for a `release_tier: critical` document, every extracted cross-reference row must be `resolved`; any non-resolved status emits a blocking `cross_reference_unresolved`, fails release validation, and requires a manifest correction, parser/resolver correction, or re-approved change of release tier before rebuilding;
+- for a `release_tier: standard` document, a non-resolved status emits an advisory `cross_reference_unresolved` and may ship only when the static review report enumerates it and the unresolved row exposes no navigable target IDs.
 
-The release summary records unresolved counts by document, tier, status, and relation type. Runtime context expansion never follows an unresolved row.
+The release summary records unresolved counts by document, tier, status, and relation type. Runtime context expansion never follows an unresolved row or a target-resolved occurrence that lacks the relation's required origin authority.
 
-Human-reviewed manifest fields are authoritative for `supersedes` and `superseded_by`. An extracted supersession statement is stored as evidence and proposed metadata, but it does not overwrite the manifest. Any disagreement emits `edition_conflict` and blocks a critical document until reviewed.
+Human-reviewed `relations` entries are authoritative for both `supersedes` and `amends`; `superseded_by` is the validated inverse of the former. An extracted version/amendment statement is stored as a `source_text` occurrence whose evidence anchor and exact offsets may be in a paragraph while its logical source endpoint is the newer or amending document root. Target resolution alone authorizes neither relation: only an approved manifest occurrence admits the edge. Exact reconciliation requires the same relation type and source document root, plus a source-text `target_document_id` and `target_node_id` equal to the node selected by that manifest entry's exact target document and selector. A uniquely resolved source-text occurrence satisfying that complete tuple is coalesced only as additional provenance for the manifest-authorized edge; without the exact match it remains non-navigable proposed metadata with no `edge_id` and cannot explain a conflict. An invalid logical source root fails release validation. A different target, selector result, relation type, or edition never creates a competing source-text edge, emits `edition_conflict`, and blocks a `release_tier: critical` document until reviewed.
 
-Initial relation types:
+Rows that satisfy both target resolution and the relation-specific origin-authority policy normalize into typed semantic edges in the logical Evidence Graph. Unresolved rows and authority-insufficient proposal rows remain occurrence evidence with no edge or `edge_id`. Structural edges may remain encoded by validated node/chunk foreign keys rather than duplicated into one generic edge table. The first release will use relational graph data, not a generic graph database.
 
-- `references`
-- `depends_on`
-- `exception_to`
-- `defines`
-- `supersedes`
-- `amends`
-- `applies_subject_to`
+### 20.3 Conflict detection and handling
 
-The first release will use relational cross-reference data, not a generic graph database.
+A disagreement is itself evidence, but an apparent difference is not automatically a conflict. ClauseSift represents conflict assessment as a separate, versioned, n-ary record over exact source spans. It is not a symmetric `conflicts_with` graph edge: a conflict may have three or more positions, several dimensions, an explanation or precedence decision, and a lifecycle state. The record is derived release metadata, never a generated replacement for its source nodes.
+
+The conflict lifecycle is:
+
+| State | Meaning | Release behavior |
+| --- | --- | --- |
+| `potential` | A versioned deterministic detector, human submission, or future model-assisted detector identified comparable positions that may be incompatible, but context has not classified them. | Build-diagnostic state only. It must transition before catalog admission and can never appear in a runtime release. |
+| `confirmed` | At least two source positions have incompatible compliance sets or normative effects under the same known subject and applicability context. Confirmation comes from an exact deterministic rule or immutable human review, never solely from a model score. | May ship when every position and decision is complete. It always remains visible when material and emits `evidence_conflict`; a genuine source conflict is not itself a corrupt build. |
+| `explained` | A deterministic typed relation or trusted metadata proves why the positions are not jointly incompatible: for example unit equivalence, exception, amendment, supersession, disjoint applicability, or compatible modalities. | Retained for audit and false-positive evaluation. Ordinary answers omit it; explicit comparison or diagnostic requests may return it without a conflict warning. |
+| `unresolved` | The known evidence is insufficient to prove either incompatibility or a valid explanation, including missing applicability or precedence facts. | A record touching only `release_tier: standard` documents may ship with `conflict_unresolved`; a record touching any `release_tier: critical` document blocks release pending corrected metadata, source/parser data, or immutable review. |
+
+Each candidate has one content-addressed identity. `conflict_id` is a domain-separated SHA-256 of the RFC 8785 canonical candidate-identity object containing its identity-schema version; detector ID, version, and configuration hash; conflict and context rule-set versions and configuration hashes; canonical comparison-key hash; ordered dimensions; and canonically sorted position identities. Each position identity contains its comparison-projection hash, required-context-projection hash, and ordered exact span tuples `(document_id, node_id, node_text_start, node_text_end, source_text_sha256)`. `conflict_position_id` is a separate domain-separated SHA-256 of the candidate-identity hash plus that complete position identity, so changing any position invalidates every position reference in the decision. Position order follows the sorted canonical position-identity bytes.
+
+The strict required-context projection contains every source/manifest/classification and typed-relation fact consumed by conflict classification, including ordered context source-span hashes, manifest-content hashes, classification-provenance hashes, and relationship occurrence/provenance hashes; it contains no generated summary. The builder creates it by running the versioned Section 19 required typed-graph traversal for the position before material-conflict closure, and release validation independently recomputes it. Conflict candidates, states, decisions, and review hashes are excluded from this projection, preventing a recursive identity. Thus a same-offset wording edit, manifest or normalized-value change, applicability/exception edge change, detector/rule change, or context configuration change produces a new candidate and position ID. An old human or deterministic decision artifact cannot attach to changed evidence. Before catalog admission, the classifier applies explanation rules before confirmation rules and converts every `potential` candidate to exactly one release state. Natural-language incompatibility that no exact rule proves is `unresolved` unless an immutable human conflict-review input confirms or explains it.
+
+The closed initial dimensions are `edition_version`, `source_authority`, `jurisdiction`, `numeric_threshold`, `normative_statement`, and `applicability`. A record may have several dimensions in canonical enum order. Its comparison projection is a strict, versioned, non-authoritative object containing only source-derived structured values needed to rerun the named rule—such as normalized subject key, modality, exact decimal/rational quantity and canonical unit, scope IDs, jurisdiction IDs, effective interval, product/equipment class, and source-span hash. Original text and Evidence Lineage remain the authority.
+
+Conflict classification uses these rules in order:
+
+1. **Extraction before source comparison.** Independent parser outputs for the same source region are not two source positions and parser extraction is not a release conflict dimension. Section 11.3 exclusively owns this disagreement: a blocking difference produces no canonical node or conflict record; an admitted below-threshold difference remains `parser_comparison_difference` in build lineage. The chosen primary parser never “wins” a blocking table value silently.
+2. **Normalize only declared comparable values.** Numeric comparison uses exact decimal or rational conversion through the versioned unit registry, with any tolerance named in the rule configuration. Equal convertible quantities are `explained`. Modalities map to allowed-value sets: two stricter compatible minima or maxima are differences, not conflicts; an empty intersection under the same subject/applicability is a deterministic `confirmed` conflict.
+3. **Apply typed explanations.** `exception_to`, `applies_subject_to`, `supersedes`, and `amends` are evaluated in their Section 20 directions. An exception qualifying its target, an amendment changing its base, a historical edition replaced by a newer edition, or positions with provably disjoint jurisdiction, effective interval, product/equipment class, or other manifested scope are `explained`, not conflicts.
+4. **Do not invent applicability or precedence.** Similar clause labels, textual proximity, document type, authority name, stricter wording, active status, or ranking score cannot prove shared applicability or choose a controlling source. A `required` minimum and a stricter `recommended` value may coexist; incompatible `required` provisions from a code and manufacturer specification are `confirmed` only when shared applicability is known, and neither wins without a trusted rule. These comparisons consume the exact Section 12.2 type/status/modality values and never reconstruct a legacy composite document type.
+5. **Resolve only through admitted decisions.** A deterministic rule may confirm numeric/set incompatibility or explain typed metadata. A schema-validated, content-addressed human review may confirm or explain normative wording and may name a controlling position only with an approved `precedence_rule_id`. A model may propose `potential` candidates for later review but cannot set `confirmed`, `explained`, a controlling position, or release-gate severity.
+
+Every final state is bound to one immutable decision artifact. Its strict payload names the exact candidate ID, chosen state, explanation code or null, precedence status, optional controlling position, approved precedence-rule ID or null, decision origin, and decision-schema version; its content hash is stored separately as `decision_artifact_sha256`. A deterministic artifact also names the exact classifier rule and configuration that produced the decision. A human-reviewed artifact instead names the approved review-policy version and reviewer identity under the repository's review policy. Neither form contains generated summary text or rewrites a source claim. `precedence_status` is `not_applicable`, `encoded`, or `undetermined`; `controlling_position_id` is non-null exactly for `encoded` and must belong to that conflict. `authority`, `document_type`, or status metadata alone never implies `encoded` precedence. Changing a decision artifact, review policy, precedence rule, or rule configuration invalidates conflict analysis and every downstream artifact.
+
+#### Build and runtime responsibilities
+
+At build time ClauseSift generates deterministic numeric/structured candidates, imports exact human-reviewed candidates, attaches complete required context, classifies every candidate, materializes release records, and writes all potential-to-final transitions and detector false-positive explanations to the static report. A future replaceable semantic detector may add candidates only in `potential`. Release validation reruns deterministic comparison/explanation rules, verifies every span and review hash, and enforces the tier policy above.
+
+The builder also computes each position's canonical source cover independently of any runtime query. Its scope is the position's canonically ordered, non-overlapping node-qualified spans `(document_id, node canonical_order, node_id, node_text_start, node_text_end)`. Coverage is tracked separately for each exact span. At the first lexicographically uncovered coordinate, candidates are catalog sources with a `chunk_nodes` membership in the same document/node satisfying `node_text_start <= byte offset < node_text_end`. A candidate is **scope-contained** only when every one of its memberships lies wholly within the union of that position's spans for the same document/node; otherwise it is **broader**. If any scope-contained candidate covers the coordinate, broader candidates are ineligible at that step. If none does, broader candidates are explicitly allowed as the source-faithful fallback needed when the chunk catalogue has no exact-span representation.
+
+Within the eligible class, candidates sort by greatest clipped advance within the current exact span (descending), then least total extraneous UTF-8 membership bytes outside all position spans (ascending), then ascending `(chunk-kind rank, chunk canonical_order, chunk_id, source_id)`. The builder selects the first, adds every non-empty exact intersection of that source's memberships with all position spans to their separate coverage sets, records the source at the next dense `selection_order`, and repeats. Failure to advance or cover every byte blocks release. A source is selected at most once. The stored `conflict_position_sources` rows must exactly equal this recomputation; their `selection_order` preserves the algorithm trace, while the public `source_ids` array sorts the same set canonically by source ID. This is a conflict-position-specific cover, not permission for broader graph-target materialization under Section 19.3. A broader selected chunk's extra text carries only a conflict inclusion reason and remains visible as source-faithful context: the conflict claim and response `spans` remain the exact intersections and never attribute the extra bytes to the position.
+
+At runtime, seed filtering and ranking happen first, but they cannot erase a material admitted conflict. After each required graph closure, the runtime finds every `confirmed` or `unresolved` conflict whose position span intersects a selected source membership, reads the query-independent compiled cover for every position, adds exactly the missing cover sources as `conflict_context`, runs required Section 19 context for newly added sources, and repeats to a fixed point. It never substitutes an already returned intersecting source that is outside that canonical cover. Conflict context is required: the ordinary item/path/byte bounds count the selected sources' complete bytes, and an overflow returns `context_limit_exceeded` rather than a one-sided package. Metadata filters constrain retrieval seeds, not these exact conflict/context attachments; every attached item retains its actual edition, jurisdiction, document type, and status.
+
+The response-level `conflicts` array is required and sorted by `conflict_id`. It contains each material record once with `state`, ordered `dimensions`, `explanation_code` or null, `precedence_status`, `controlling_position_id` or null, and every position in stable `position_order`. Each position contains its stable ID, exactly the canonical source-ID-sorted `conflict_position_sources` set, and the exact document/node/byte spans that support it. It copies no detector-generated prose. Evidence added only for this closure carries `selection_roles: ["conflict_context"]` and a conflict inclusion reason naming the triggering source and position; an independently retrieved item may carry both roles. Confirmed records emit `evidence_conflict`; unresolved records emit `conflict_unresolved`. Explained records appear only for explicit version/comparison or diagnostic intent and cannot be presented as unexplained conflict.
+
+Downstream clients must preserve every returned material position and warning. They may state an encoded precedence decision only with its rule ID and citations to all positions; otherwise they must describe the disagreement or uncertainty and cannot silently select the highest-ranked, newest, strictest, mandatory-looking, or model-preferred side. ClauseSift does not make legal, professional, or engineering-control judgments that are absent from approved deterministic metadata/rules.
+
+#### Worked conflict examples
+
+**Confirmed numeric conflict.** Two active normative `requirement` nodes with `source_modality: required` for the same manifested equipment class and jurisdiction state `x >= 50 L/s` and `x <= 40 L/s`. Exact unit normalization yields disjoint allowed sets, so the record is `confirmed`. A hit on either position forces both source-backed positions into the package; no winner is named unless an approved precedence rule does so.
+
+**Valid exception.** Requirement `R` prohibits an action, exception `E --exception_to--> R` permits it, and `E --applies_subject_to--> C` binds the condition under which the exception applies. Required traversal returns `R`, `E`, and `C`; the candidate is `explained` by `exception`, not a confirmed contradiction. Retrieving `R` without the exception or `C` would instead be a context-completeness failure.
+
+**Version/amendment difference.** A 2026 amendment changes a 2024 clause and has a validated `amends` edge; a newer edition has a manifested `supersedes` edge to the old edition. The differences are `explained` and remain edition-separated. An explicit historical/version query may return both records and the explanation; an ordinary current query never substitutes or blends clause numbers across editions.
+
+**Jurisdiction/applicability difference.** One requirement applies only in jurisdiction A and another only in jurisdiction B, so trusted disjoint applicability makes the candidate `explained`. If one side lacks jurisdiction or equipment-class metadata, ClauseSift cannot assume overlap or disjointness: the candidate becomes `unresolved`, ships only when all touched documents have `release_tier: standard`, and returns all known sides with `conflict_unresolved`.
 
 ---
 
 ## 21. Evidence package
 
-ClauseSift returns structured evidence, not only prose.
+ClauseSift returns structured evidence, not only prose. An Evidence Package is the serialized client-facing projection of one bounded runtime evidence subgraph: source-backed objects are in `evidence`, while accepted empty structural nodes are in `context_targets`. It does not transfer graph authority to the client or collapse distinct source nodes into a generated claim.
 
 Example:
 
@@ -931,13 +1348,15 @@ Example:
   "query": "When may mechanical smoke exhaust be omitted?",
   "retrieval_mode": "high_accuracy",
   "release": "rel-sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "context_completeness": "complete",
   "evidence": [
     {
       "source_id": "src-001",
       "document_id": "as-1668-1-2015",
       "document_code": "AS 1668.1",
       "edition": "2015",
-      "document_type": "mandatory_standard",
+      "document_type": "standard",
+      "document_normative_status": "normative",
       "status": "active",
       "clause": "4.6.2",
       "heading_path": [
@@ -945,36 +1364,342 @@ Example:
         "Fan operation"
       ],
       "node_type": "requirement",
+      "normative_status": "normative",
+      "source_modality": "required",
       "content_trust": "untrusted_source",
       "page_start": 47,
       "page_end": 47,
       "original_text": "...",
       "citation": "[AS 1668.1:2015, cl. 4.6.2, p.47]",
       "bounding_boxes": [],
-      "retrieval_channels": [
-        "lexical",
-        "dense"
-      ],
-      "rerank_score": 0.91,
-      "source_file_hash": "sha256:...",
-      "warnings": []
+      "lineage": {
+        "lineage_schema_version": "0.1.0",
+        "source": {
+          "manifest_content_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "source_file_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "source_file_size": 4821936,
+          "coordinate_status": "page_only",
+          "spans": [
+            {
+              "node_id": "node-requirement-001",
+              "node_text_start": 0,
+              "node_text_end": 128,
+              "page_spans": [
+                {
+                  "page_number": 47,
+                  "node_text_start": 0,
+                  "node_text_end": 128,
+                  "bounding_boxes": []
+                }
+              ]
+            }
+          ]
+        },
+        "build": {
+          "build_content_id": "build-sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "lineage_artifact_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "catalog_artifact_sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "evidence_vocabulary_version": "1.0.0",
+          "evidence_vocabulary_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000014",
+          "edge_identity_schema_version": "edge-id.v1",
+          "occurrence_identity_schema_version": "xref-id.v1",
+          "context_rule_set_version": "context.v1",
+          "context_rule_configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000011",
+          "conflict_rule_set_version": "conflict.v1",
+          "conflict_rule_configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000020",
+          "chunk_id": "chunk-001",
+          "canonical_node_ids": [
+            "node-requirement-001"
+          ],
+          "classification_records": [
+            {
+              "node_id": "node-requirement-001",
+              "field": "node_type",
+              "value": "requirement",
+              "origin": "deterministic_rule",
+              "rule_or_review_id": "classification.requirement.v1",
+              "support": {
+                "kind": "source_span",
+                "node_id": "node-requirement-001",
+                "node_text_start": 0,
+                "node_text_end": 128
+              },
+              "provenance_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000015"
+            },
+            {
+              "node_id": "node-requirement-001",
+              "field": "normative_status",
+              "value": "normative",
+              "origin": "source_marker",
+              "rule_or_review_id": "source-convention.as.v1",
+              "support": {
+                "kind": "source_span",
+                "node_id": "node-requirement-001",
+                "node_text_start": 0,
+                "node_text_end": 128
+              },
+              "provenance_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000016"
+            },
+            {
+              "node_id": "node-requirement-001",
+              "field": "source_modality",
+              "value": "required",
+              "origin": "source_marker",
+              "rule_or_review_id": "modality.shall.v1",
+              "support": {
+                "kind": "source_span",
+                "node_id": "node-requirement-001",
+                "node_text_start": 0,
+                "node_text_end": 128
+              },
+              "provenance_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000017"
+            }
+          ],
+          "transform_artifacts": [
+            {
+              "kind": "parser_neutral",
+              "role": "canonical_primary",
+              "producer_id": "docling",
+              "producer_version": "2.4.0",
+              "configuration_sha256": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "artifact_sha256": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+            },
+            {
+              "kind": "parser_neutral",
+              "role": "independent_comparator",
+              "producer_id": "pymupdf-extractor",
+              "producer_version": "1.0.0",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000018",
+              "artifact_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000019"
+            },
+            {
+              "kind": "parser_validation_report",
+              "role": "validation",
+              "producer_id": "clausesift-parser-validator",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+              "artifact_sha256": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+            },
+            {
+              "kind": "canonical_model",
+              "role": "transform",
+              "producer_id": "clausesift-canonicalizer",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+              "artifact_sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            },
+            {
+              "kind": "page_provenance",
+              "role": "transform",
+              "producer_id": "clausesift-page-mapper",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+              "artifact_sha256": "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+            },
+            {
+              "kind": "chunk_projection",
+              "role": "transform",
+              "producer_id": "clausesift-chunker",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+              "artifact_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
+            },
+            {
+              "kind": "relationship_resolution",
+              "role": "transform",
+              "producer_id": "clausesift-relationship-resolver",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000005",
+              "artifact_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000006"
+            },
+            {
+              "kind": "conflict_analysis",
+              "role": "transform",
+              "producer_id": "clausesift-conflict-analyzer",
+              "producer_version": "0.1.0",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000012",
+              "artifact_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000013"
+            }
+          ],
+          "uncertainty": {
+            "ocr_status": "not_used",
+            "minimum_ocr_confidence": null,
+            "parser_comparison_status": "passed_exact"
+          }
+        },
+        "assembly": {
+          "selection_roles": [
+            "retrieval_seed"
+          ],
+          "seed_source_ids": [
+            "src-001"
+          ],
+          "context_completeness": "complete",
+          "retrievals": [
+            {
+              "channel": "lexical",
+              "channel_version": "fts5.v1",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000009",
+              "artifact_set_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+              "candidate_rank": 2,
+              "score": 12.4
+            },
+            {
+              "channel": "dense",
+              "channel_version": "exact-cosine.v1",
+              "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000010",
+              "artifact_set_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000003",
+              "candidate_rank": 4,
+              "score": 0.78
+            }
+          ],
+          "fusion": {
+            "algorithm_id": "rrf.v1",
+            "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000007",
+            "rank": 1,
+            "score": 0.0325
+          },
+          "rerank": {
+            "model_id": "example-cross-encoder",
+            "model_revision": "rev-1",
+            "configuration_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000008",
+            "artifact_set_sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000004",
+            "rank": 1,
+            "score": 0.91
+          },
+          "context_paths": [],
+          "conflict_reasons": []
+        }
+      },
+      "warnings": [
+        {
+          "code": "source_coordinate_incomplete",
+          "phase": "runtime",
+          "severity": "advisory",
+          "message": "Source page is known but bounding-box coverage is incomplete.",
+          "source_id": "src-001",
+          "details": {
+            "lineage_stage": "source"
+          }
+        }
+      ]
     }
   ],
+  "context_targets": [],
+  "conflicts": [],
   "warnings": [
     {
       "code": "applicability_incomplete",
       "phase": "runtime",
       "severity": "advisory",
       "message": "Applicability depends on building classification.",
-      "source_id": "src-001"
+      "source_id": "src-001",
+      "details": {
+        "lineage_stage": "assembly"
+      }
+    },
+    {
+      "code": "source_coordinate_incomplete",
+      "phase": "runtime",
+      "severity": "advisory",
+      "message": "Source page is known but bounding-box coverage is incomplete.",
+      "source_id": "src-001",
+      "details": {
+        "lineage_stage": "source"
+      }
     }
   ]
 }
 ```
 
+The item above is a direct retrieval seed: both retrieval channels and the reranker are identified, its own source is the seed, and `context_paths` is empty. The result-level `context_completeness` is the deterministic worst state across every direct seed and optional traversal: `incomplete_required` takes precedence over `truncated_optional`, which takes precedence over `complete`; warnings preserve both conditions if they coexist. An expanded exception attached to that seed instead has this assembly lineage excerpt; its required source and build objects have the same complete shape as above:
+
+```json
+{
+  "source_id": "src-exception-001",
+  "lineage": {
+    "assembly": {
+      "selection_roles": [
+        "expanded_context"
+      ],
+      "seed_source_ids": [
+        "src-001"
+      ],
+      "context_completeness": "complete",
+      "retrievals": [],
+      "fusion": null,
+      "rerank": null,
+      "context_paths": [
+        {
+          "seed_source_id": "src-001",
+          "context_class": "required",
+          "steps": [
+            {
+              "edge_id": "edge-sha256-487920acf30fd6fd42a34b12134e2624c26d4955c35288c7dd0828535e4ff0fe",
+              "relation_type": "exception_to",
+              "direction": "reverse",
+              "from_node_id": "node-requirement-001",
+              "to_node_id": "node-exception-001",
+              "origin_groups": [
+                {
+                  "relation_origin": "source_text",
+                  "occurrence_ids": [
+                    "xref-sha256-02485de100a2940ab256703374853265ad40108fcc70592a60dd9edb91d564e4"
+                  ]
+                }
+              ],
+              "context_rule_id": "context.exception.v1"
+            }
+          ]
+        }
+      ],
+      "conflict_reasons": []
+    }
+  }
+}
+```
+
+`lineage`, `source`, `build`, `uncertainty`, `assembly`, every classification/artifact reference, retrieval record, path, path step, and conflict reason are closed objects with `additionalProperties: false`; all fields shown in the complete direct-item example are required, with only the explicitly nullable values allowed to be null. The enclosing item's `document_id` and `source_id` select the document/source lineage record and must match it exactly. Source spans are the chunk's contributed `chunk_nodes` intervals sorted by `(node member_order, node_text_start, node_text_end)`. For each source span `[start, end)`, the expected `page_spans` are exactly the non-empty intersections with that node's validated `node_page_spans`: each interval is clipped to `[max(start, mapping_start), min(end, mapping_end))`, retains the mapping's page and box projection, and is emitted in validated `mapping_order`. Those clipped intervals form a complete non-overlapping partition of the contributed `[start, end)` only; a token-limit chunk that contributes part of a node neither emits nor validates against the rest of that node. The serializer independently recomputes this intersection set and requires exact equality. The public `page_start`, `page_end`, and `bounding_boxes` fields are convenient projections only: the serializer recomputes them from `lineage.source.spans` and fails closed unless they match exactly. `canonical_node_ids` is the ordered membership projection for `chunk_id`; an ID not owned by the item's document or chunk is a release-integrity failure.
+
+`document_type`, `document_normative_status`, `status`, `node_type`, `normative_status`, and `source_modality` use only the exact active Section 12.2 vocabulary and must match their catalog projections. `document_normative_status` is the approved manifest value; the unprefixed status is the citation node's separate classification. The three node classification records sort by canonical node order and then field order `node_type`, `normative_status`, `source_modality`; they contain every contributing retrievable node exactly once per field. Each value/origin/rule and provenance hash matches the catalog and verified `lineage.json`. The item's scalar node classifications match its validated `citation_node_id`; member records remain complete when a valid container representation includes differently classified descendants. `evidence_vocabulary_version` and its artifact hash match the release manifest. Any admitted scalar or member `unclassified`/`unknown` value carries `classification_unresolved`; retrieval, ranking, and serialization never substitute a stronger value.
+
+Classification `support` is a strict tagged union: `source_span` contains exact node byte boundaries; `ancestor` contains the supporting ancestor node/field/provenance hash; `manifest` contains the approved manifest-content hash; and `review` contains the immutable review-artifact hash. `deterministic_rule` uses the exact source/ancestor/manifest support it consumed plus a non-null rule ID; `inherited` requires ancestor support; `manifest` requires manifest support; `human_reviewed` requires review support; and `source_marker` requires a source span. `rule_or_review_id` is null only when the selected origin does not use one. The provenance SHA-256 covers the complete canonical classification record except that hash field itself.
+
+`transform_artifacts` follows the stage order in Section 7.2 and contains all selected parser-neutral routes before the validation report and selected canonical transformations, including relationship resolution and conflict analysis. `role` is a closed value appropriate to the artifact kind. `producer_id`, `producer_version`, configuration hash, and artifact hash must equal the verified `lineage.json` record. The edge- and occurrence-identity schema versions and the context/conflict rule-set versions and configuration hashes must equal the active manifest and bind path/occurrence identity, traversal, comparison, review, ordering, limits, and rule IDs. `parser_comparison_status` is `not_required`, `passed_exact`, or `passed_with_differences`. `not_required` is valid only for a `release_tier: standard` document whose approved routing configuration disables comparison mode, and its artifacts contain only the `canonical_primary` route before the single-parser validation report. Every comparison-mode document—therefore every `release_tier: critical` document—contains exactly the ordered `canonical_primary` and distinct-implementation `independent_comparator` parser-neutral artifacts before its passing comparison report and uses one of the two `passed_*` states. `passed_with_differences` requires an evidence-bound `parser_comparison_difference` warning. `ocr_status` is `not_used` or `used`; when used, `minimum_ocr_confidence` is the minimum confidence of the contributing spans and a below-policy value requires `ocr_low_confidence`.
+
+`selection_roles` uses the closed canonical order `retrieval_seed`, `expanded_context`, `conflict_context`; `seed_source_ids` are non-empty, unique, and canonically sorted. `context_completeness` is the closed value `complete`, `incomplete_required`, or `truncated_optional` and agrees with the required Section 19 warnings. Retrieval records use the closed channels `exact`, `lexical`, and `dense`, are ordered by the versioned channel rank, and identify the exact checksummed release artifact set that produced the candidate; an item that is only context has an empty array, while a retrieval seed has at least one record. `candidate_rank` is one-based, and `score` is a finite number or null only for an exact lookup with no numeric scorer. An artifact-set hash is the SHA-256 of the versioned canonical ordered `(relative_path, byte_size, sha256)` tuples for its manifest-admitted files, so a multi-file index or model is named without exposing paths in the public object. `fusion` and `rerank` identify their versioned algorithm/model inputs and decision rank/score and are null when that stage did not run. Every context-path object binds one `seed_source_id` and `context_class` to a non-empty ordered `steps` array. Paths are unique by `(seed_source_id, context_class, ordered edge-ID sequence)` and sort by the Section 19 queue order. Every item carrying `expanded_context` has at least one path, and every step must match one release-validated structural or semantic edge and its complete Section 20.1 `origin_groups`. `edge_id` always identifies that edge in its Section 20 canonical direction even when the step's `direction` is `reverse`; the example reverse exception step therefore hashes `node-exception-001 --exception_to--> node-requirement-001`, not its traversal order. `conflict_reasons` is empty unless the item carries `conflict_context`; each reason is `{conflict_id, conflict_position_id, triggering_source_ids}` and must match one returned conflict position and its canonical triggering sources. An item reached several ways retains every role, path, and reason.
+
+`context_targets` is a required array on every evidence-bearing success and is empty when no accepted traversal target is an empty structural node. Each record is a closed object with exactly `{document_id, node_id, document_code, edition, document_type, document_normative_status, status, clause, heading_path, node_type, normative_status, source_modality, content_trust, context_paths}`. All identity, classification, status, clause, and heading values are exact safe projections from the checksum-verified active catalog and manifest; `clause` is string or null, `heading_path` is the complete ordered path, and `content_trust` is the constant `untrusted_source`. The record contains neither `original_text` nor any source locator, coordinate, box, citation, or source/build lineage object. `context_paths` is non-empty, uses the same strict path/step schema and ordering as evidence-item assembly lineage, and every path terminates at that exact `(document_id, node_id)`. Records deduplicate by that composite identity, merge independent paths, and sort by the Section 19 order. A missing, extra, source-bearing, catalog-mismatched, pathless, or unreachable record fails serialization; release validation and the central serializer fail closed if a required accepted empty target is absent, so such an omission can never yield a `complete` or partial success.
+
+`conflicts` is a required array on every evidence-bearing success and is empty when no material record applies. Each strict conflict object has exactly:
+
+```text
+conflict_id
+state
+dimensions[]
+candidate_identity_schema_version
+comparison_key_sha256
+detector_id
+detector_version
+detector_configuration_sha256
+conflict_rule_set_version
+conflict_rule_configuration_sha256
+context_rule_set_version
+context_rule_configuration_sha256
+decision_origin
+decision_artifact_sha256
+explanation_code
+precedence_status
+precedence_rule_id
+controlling_position_id
+positions[]
+```
+
+`potential` is invalid publicly. Dimensions use the Section 20.3 enum and order. The candidate-identity, comparison-key, detector, conflict-rule-set, and context-rule-set fields are non-null for every record and exactly match the release catalog and the identity material hashed into `conflict_id`; they describe candidate generation independently of the eventual decision origin. Their explicitly qualified configuration hashes are not interchangeable. `decision_origin` is `deterministic_rule` or `human_reviewed`, and `decision_artifact_sha256` identifies the corresponding strict Section 20.3 decision artifact; a human-reviewed record therefore never needs to invent a comparison-rule ID. `explanation_code` is null unless state is `explained`, when it is one of `unit_equivalent`, `compatible_modality`, `exception`, `amendment`, `supersession`, `disjoint_jurisdiction`, `disjoint_effective_interval`, `disjoint_product_or_equipment_class`, or `human_reviewed_nonconflict`. Precedence fields follow Section 20.3 and do not imply that ClauseSift independently chose a winner. Each strict position object is `{conflict_position_id, position_order, source_ids, spans}`. `source_ids` is exactly the non-empty source-ID-sorted projection of the compiled `conflict_position_sources` cover, and every named source exists once in returned `evidence`; an intersecting retrieval source outside that set is not substituted into it. Each strict span is `{document_id, node_id, node_text_start, node_text_end}` and exactly matches the release record. The serializer recomputes the exact intersections supplied by the source set and requires complete position coverage; extra bytes from an explicitly selected broader fallback remain ordinary source text and are not added to `spans`. Positions are dense and ordered, and every `conflict_context` reason points back to one of these objects. Missing sides, extra sides, stale or non-canonical cover IDs, generated summaries, or a position not completely covered by the returned evidence make serialization fail closed.
+
 Citation fields are generated programmatically. The AI client must not invent or repair missing citations.
 
-Every warning is an object with a Section 31 `code`, `phase`, `severity`, a human-readable `message`, and optional `source_id` and structured `details`; bare warning strings are invalid. `original_text` and other document-derived fields are untrusted quoted evidence, not instructions to the MCP host or model. Evidence items carry `content_trust: "untrusted_source"`, and tool descriptions instruct clients to preserve that boundary.
+Every warning is an object with a Section 31 `code`, `phase`, `severity`, a human-readable `message`, and optional `source_id` and structured `details`; bare warning strings are invalid. Evidence-bound source or build uncertainty is deterministically projected from the admitted diagnostic record into the corresponding Section 31 runtime warning, names the affected `source_id`, and includes the closed `lineage_stage` value `source`, `build`, or `assembly` plus a diagnostic-artifact hash when that code's details contract permits it. Top-level warnings are the union of item warnings and request-level assembly warnings, deduplicated by complete canonical warning bytes and sorted by `(code, phase, source_id-or-empty, canonical details bytes, message)`; warning absence never erases `coordinate_status` or the build uncertainty object. `original_text` and other document-derived fields are untrusted quoted evidence, not instructions to the MCP host or model. Evidence items carry `content_trust: "untrusted_source"`, and tool descriptions instruct clients to preserve that boundary.
 
 ---
 
@@ -1019,7 +1744,7 @@ get_clause(
 )
 ```
 
-The lookup resolves one canonical clause node, then returns every distinct persisted chunk whose `chunk_nodes` membership is required to cover that clause's retrievable canonical subtree. It returns one evidence item only when one chunk provides the complete coverage; otherwise it returns one item per covering chunk in ascending canonical chunk order, regardless of whether the boundaries came from independently chunked subclauses, whole-table and row representations, semantic paragraphs, or a token-limit split. Each item retains its own `source_id`, page span, bounding boxes, and source-faithful `original_text`; the handler must not aggregate several chunks under one source ID or omit any covering chunk.
+The lookup resolves one canonical clause node, recomputes the exact-lookup set defined in Section 14.1, and creates one direct evidence item for every chunk in that set in ascending canonical chunk order. There is no minimal-cover selection or single-complete-chunk shortcut: when a whole-clause representation and mandatory atomic, row, semantic-boundary, or token-split representations are all wholly inside the subtree, every one remains a distinct direct item. Each retains its own `source_id`, page span, bounding boxes, and source-faithful `original_text`; the handler neither aggregates several chunks under one source ID nor applies Section 19's expanded-target greedy cover to direct exact lookup. It then performs Section 19 required closure from all direct items. Expanded items follow the direct exact-lookup set, remain distinguishable in lineage, and do not change that set. Release validation includes the complete direct set and its required closure in the response-bound and frame-size proof.
 
 #### `get_context`
 
@@ -1028,17 +1753,23 @@ Expand a previously returned source ID with its parent conditions, exceptions, n
 ```python
 get_context(
     source_id: str,
+    context_level: str = "supporting",
     include_parent: bool = True,
+    include_applicability: bool = True,
+    include_dependencies: bool = True,
+    include_definitions: bool = True,
     include_exceptions: bool = True,
     include_notes: bool = True,
     include_tables: bool = True,
     include_references: bool = True,
+    include_versions: bool = False,
+    include_adjacent: bool = False,
 )
 ```
 
-The success object always contains all five context arrays: `parents`, `exceptions`, `notes`, `tables`, and `references`. A false include flag performs no traversal for that relation class and requires the corresponding array to be empty; a true flag may also produce an empty array when no matching relation exists. The strict output schema requires all five properties and does not vary its shape with the flags.
+`context_level` is the Section 19 closed enum and its schema description states the inclusive class behavior. The success object always contains top-level `release`, `source_id`, `context_completeness`, `evidence`, `context_targets`, `context`, `conflicts`, and `warnings`. The required `context` object always contains all ten relation arrays: `parents`, `applicability`, `dependencies`, `definitions`, `exceptions`, `notes`, `tables`, `references`, `versions`, and `adjacent`; those arrays never appear at the top level. `evidence` is the canonical source-ID-deduplicated union of the requested source, every source-backed evidence object projected into a context array, and every conflict-only attachment required by Section 20.3. `context_targets` is the composite-ID-deduplicated union of every accepted empty structural target projected into a context array. A complete evidence object or metadata target repeated in a context array is byte-for-byte identical to its corresponding top-level Section 21 object; a relation-only record may refer only to a source ID present in `evidence` or a `(document_id, node_id)` present in `context_targets`. Thus every conflict-position source ID resolves against `evidence`, while every accepted path terminal resolves against one of the two top-level arrays. Serialized duplicate objects still count against the response-frame bound. A false include flag performs no traversal for that relation family and requires its corresponding nested array to be empty; a true flag may also produce an empty array when no matching relation exists. Version and adjacency traversal are opt-in even at diagnostic level. The strict output schema requires every listed top-level field, requires all ten arrays inside its closed `context` object, and does not vary its shape with the flags.
 
-The exact `source_id` identifies one chunk, not one arbitrary anchor node. For every enabled relation class, context expansion starts from every node in that chunk's `chunk_nodes`, in persisted `member_order`; it never selects only the first member. Each candidate records the originating member order, traversal depth, versioned relation-type rank, target document and node IDs, target node canonical order, and stable relation ID. That ID is the persisted relation ID when one exists and otherwise the deterministic hash of `(relation_class, source node ID, target node ID)` for a structural edge. Within an output array, the handler deduplicates by semantic identity `(relation_class, target_document_id, target_node_id, relation_type)`, retaining the candidate with the lexicographically smallest provenance tuple `(originating member_order, traversal_depth, relation-type rank, target document_id, target canonical_order, stable relation ID)`, then sorts the retained records by that tuple. Thus a parent or applicability relation reachable from several member nodes appears once, while context unique to any member cannot be omitted. Parent traversal follows the validated tree to its root; exceptions, notes, tables, and references use their declared direct catalog relations and do not recursively expand a referenced target.
+The exact `source_id` identifies one chunk, not one arbitrary anchor node. Expansion starts from every node in that chunk's `chunk_nodes`, in persisted `member_order`; it never selects only the first member. The common Section 19 engine applies only enabled relation families through the requested level, uses its numeric bounds and queue ordering, projects source-backed results without changing their Evidence Lineage, projects empty structural targets without inventing source lineage, and preserves every independent accepted path after source-ID or composite target-ID deduplication. Arrays correspond to reverse `contains`, `applies_subject_to`, `depends_on`, definition targets or governing `defines` scope, reverse/forward `exception_to`, note/footnote targets, table targets, ordinary `references`, `supersedes`/`amends`, and `precedes` respectively. A source-backed result qualifying for several arrays appears in each relevant array with the same `source_id` and lineage; an empty target appears with the same `(document_id, node_id)` and merged paths. Neither acquires several identities. A disabled family is not treated as incomplete in this explicit inspection call; unresolved required context in an enabled family is `incomplete_required`.
 
 #### `get_document_metadata`
 
@@ -1085,7 +1816,7 @@ The stdio decoder caps each complete inbound JSON-RPC frame at 1,048,576 bytes b
 | --- | --- |
 | Search query | Trimmed `minLength: 1`, `maxLength: 4096`; encoded query value at most 16,384 UTF-8 bytes. |
 | Opaque `document_id` or `source_id` | `minLength: 1`, `maxLength: 128`, pattern `^[a-z0-9][a-z0-9._:-]{0,127}$`. |
-| Clause number, document code, edition, jurisdiction, discipline, status, document type, or mode string | `minLength: 1`, `maxLength: 128`; enum fields remain closed enums. |
+| Clause number, document code, edition, jurisdiction, discipline, status, document type, mode, or context-level string | `minLength: 1`, `maxLength: 128`; enum fields remain closed enums. |
 | Cursor | `minLength: 1`, `maxLength: 4096`, plus authenticated-cursor syntax and release binding; the same maximum applies to every emitted `next_cursor`. |
 | Any filter array | `maxItems: 64` and `uniqueItems: true`; `search_evidence` accepts at most 256 total values across all filter arrays. |
 | Result limit | Integer in the inclusive range 1-100. |
@@ -1099,11 +1830,11 @@ The following semantic contract is normative. Each tool's input and advertised s
 
 | Tool | Selection semantics | Success result | Domain-error cases |
 | --- | --- | --- | --- |
-| `search_evidence` | Bounded trimmed query; values are ORed within each supplied bounded filter list and filter categories are ANDed; `status: null` removes the default active-status filter; `mode` resolves under Section 17. | `{query, retrieval_mode, release, evidence, warnings}` where `evidence` is an ordered array of Section 21 evidence items and `warnings` is an array of typed warning objects. | `identifier_invalid` for malformed or over-limit query, filters, or aggregate arguments; `feature_unavailable` for an explicit unsupported mode or bounded load failure; `release_integrity_failed` when a lazy model asset fails its pre-load integrity check. No matches is a success, not an error. |
-| `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. Resolve the canonical clause node and select every distinct persisted chunk needed to cover its retrievable subtree, independent of chunk-boundary cause. | `{release, evidence, warnings}` with a non-empty, canonically ordered array of Section 21 evidence items, one per covering chunk. Every item retains its own `source_id` and source span. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent. |
-| `get_context` | Exact `source_id`; each boolean independently controls traversal of that relation class. False performs no traversal and yields an empty array for the class. | `{release, source_id, context, warnings}` where `context` always has required arrays `parents`, `exceptions`, `notes`, `tables`, and `references`, each containing catalog-bound evidence or relation records when requested and found. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown source. |
-| `get_document_metadata` | Exact opaque `document_id`; no active-edition fallback. | `{release, document}` where `document` contains the safe manifest projection, source hash, review status, and release identity, but no absolute path. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown document. |
-| `list_documents` | Non-null filters are ANDed; each filter value is an exact normalized enum or discipline key; ordering and cursor rules are those stated above. | `{release, items, next_cursor}` where every item is the same safe document-metadata summary and `next_cursor` is string or null. | `identifier_invalid` for a malformed filter, limit, or cursor; `resource_not_found` for a cursor bound to another release. |
+| `search_evidence` | Bounded trimmed query; values are ORed within each supplied bounded filter list and filter categories are ANDed; `status: null` removes the default active-status filter; `mode` resolves under Sections 17 and 19. Filters constrain direct seeds; every seed runs required graph-and-conflict closure, and high accuracy also requests supporting context. | `{query, retrieval_mode, release, context_completeness, evidence, context_targets, conflicts, warnings}` where `evidence` contains ordered direct, expanded, and conflict-context Section 21 source items; `context_targets` contains accepted empty-node metadata records; `conflicts` contains the material Section 20.3 records; and `warnings` is typed. | `identifier_invalid` for malformed or over-limit query, filters, or aggregate arguments; `feature_unavailable` for an explicit unsupported mode or bounded load failure; `context_limit_exceeded` when complete required graph/conflict closure cannot fit a declared bound; `release_integrity_failed` when a lazy model asset fails its pre-load integrity check. No matches is a `complete` success with empty evidence/context-target/conflict arrays, not an error. |
+| `get_clause` | Exact opaque `document_id` plus normalized exact `clause_number`; no fuzzy clause or edition substitution. Resolve the canonical clause node and select every chunk in its Section 14.1 exact-lookup set, then run required graph-and-conflict closure from every direct source. | `{release, context_completeness, evidence, context_targets, conflicts, warnings}` with a non-empty, canonically ordered source-backed `evidence` array and a possibly empty metadata-target array. Exactly the full exact-lookup set is `retrieval_seed`; later evidence items are distinguishable `expanded_context` or `conflict_context`. Every evidence item retains its own `source_id` and source span. | `identifier_invalid` for malformed input; `resource_not_found` when the document or clause is absent; `context_limit_exceeded` when complete required graph/conflict closure cannot fit a declared bound. |
+| `get_context` | Exact `source_id`; `context_level` includes all context classes through the named level; each boolean independently controls one relation family and false yields an empty array for that family. Conflict closure still preserves every material side reached by an enabled family. | `{release, source_id, context_completeness, evidence, context_targets, context, conflicts, warnings}` where the first two arrays are the canonical unions defined above and `context` always has required arrays `parents`, `applicability`, `dependencies`, `definitions`, `exceptions`, `notes`, `tables`, `references`, `versions`, and `adjacent`, each containing catalog-bound evidence, metadata-target, or relation records when requested and found. | `identifier_invalid` for malformed input or context level; `resource_not_found` for an unknown source; `context_limit_exceeded` when complete required graph/conflict closure for the enabled families cannot fit a declared bound. |
+| `get_document_metadata` | Exact opaque `document_id`; no active-edition fallback. | `{release, document}` where `document` contains the safe manifest projection, including exact vocabulary version, document type, normative status, lifecycle status, authority, jurisdiction/discipline sets, source hash, review status, and release identity, but no absolute path or inferred legal force. | `identifier_invalid` for malformed input; `resource_not_found` for an unknown document. |
+| `list_documents` | Non-null filters are ANDed; each filter value is an exact normalized Section 12.2 enum or discipline key; ordering and cursor rules are those stated above. | `{release, items, next_cursor}` where every item is the same safe document-metadata summary and `next_cursor` is string or null. | `identifier_invalid` for a malformed filter, limit, or cursor; `resource_not_found` for a cursor bound to another release. |
 | `get_page_reference` | Exact opaque `document_id` and one-based integer page number within the manifested source. | `{release, document_id, page_number, page_label, page_uri, content_hash}` where `page_uri` is an authorized `standards://page/...` resource URI, never a filesystem path. | `identifier_invalid` for malformed or out-of-range input; `resource_not_found` for an unknown document or unavailable page. |
 
 Client-supplied `document_id`, `source_id`, cursor, and page or clause identifiers are opaque catalog keys. A handler first resolves them through a parameterized catalog query. It must never interpolate them into SQL, concatenate them into a filesystem path, or decode a cursor into a path. Any catalog-derived path is resolved against an allowlisted release or originals root, then rejected unless it is a regular file beneath that root after normalization and symlink, junction, or reparse-point resolution.
@@ -1146,7 +1877,7 @@ Every successful `resources/read` result contains exactly one content item whose
 | URI | Content item and exact emitted bytes |
 | --- | --- |
 | `standards://document/{document_id}` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the same safe `{release, document}` success object as `get_document_metadata`. |
-| `standards://clause/{document_id}/{clause_number}` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the same `{release, evidence, warnings}` success object as `get_clause`. |
+| `standards://clause/{document_id}/{clause_number}` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the same `{release, context_completeness, evidence, context_targets, conflicts, warnings}` success object as `get_clause`. |
 | `standards://source/{source_id}` | `TextResourceContents`, `mimeType: text/plain;charset=utf-8`; its `text` is exactly the source chunk's validated `original_text`, with no wrapper or normalization, so UTF-8 encoding reproduces the source-faithful bytes. |
 | `standards://page/{document_id}/{page_number}` | `BlobResourceContents`, `mimeType: application/pdf`; its `blob` is the base64 encoding of the complete bounded and verified original PDF, and decoding it yields those exact bytes. The URI and companion tool result select the one-based page for client navigation; `get_page_reference.content_hash` equals the SHA-256 of the decoded PDF bytes (`documents.source_file_hash`), not a rendered-page hash. |
 | `standards://release/current` | `TextResourceContents`, `mimeType: application/json`; UTF-8 RFC 8785 serialization of the safe immutable release summary and manifest digest. |
@@ -1161,6 +1892,7 @@ The full-PDF page contract avoids pretending that a renderer-created image is an
 - A resource URI with a malformed route shape, malformed percent escape, invalid UTF-8, or non-canonical encoding returns JSON-RPC `-32602` (`Invalid params`) on both protocol paths, with no `contents`. No catalog lookup occurs.
 - An unknown, well-formed `standards://` resource is never represented as a tool result or an empty `contents` success. `resources/read` returns JSON-RPC `-32602` on the per-request `2026-07-28` path and `-32002` on a `2025-11-25` session. This protocol error is distinct from the ClauseSift `resource_not_found` diagnostic used by tool calls.
 - When a known page resource's external original fails the handle-bound containment, identity, stability, size, or hash check below, `resources/read` returns JSON-RPC internal error `-32603` on both protocol paths with the code-owned message `Source integrity check failed` and safe data `{code: "source_hash_mismatch", phase: "runtime", severity: "blocking"}`. It returns no `contents`, absolute path, raw exception text, or partial frame; this denies that resource read without invalidating the immutable release catalogue.
+- When a canonical clause resource's complete required closure would exceed a Section 19 bound, `resources/read` returns JSON-RPC internal error `-32603` on both protocol paths with the code-owned message `Required context exceeds limit` and safe data restricted to `{code: "context_limit_exceeded", phase: "runtime", severity: "blocking", bound_name, configured, observed}`. It returns no `contents` or partial Evidence Package.
 - Cancellation of an in-progress request follows the per-request revision on the `2026-07-28` path or the initialized session revision on the `2025-11-25` path. Retrieval stops promptly, releases temporary resources, records a non-response cancellation event, and does not publish a partial success or a second tool response. Each request owns an atomic terminal state initially `pending`; success, tool error, cancellation, and server deadline each attempt one compare-and-set transition. The first successful transition is authoritative, including when events carry equal monotonic timestamps, and every losing completion is discarded before serialization.
 - Progress notifications are emitted only when the client supplied a progress token and the applicable per-request or session revision supports them.
 
@@ -1168,8 +1900,8 @@ The full-PDF page contract avoids pretending that a renderer-created image is an
 
 For “When may mechanical smoke exhaust be omitted?” the client performs this sequence:
 
-1. Call `search_evidence(query=..., mode="high_accuracy")` and verify that the result is successful, has evidence, and does not contain a blocking diagnostic.
-2. Take `evidence[0].source_id` from that result and call `get_context(source_id=..., include_parent=true, include_exceptions=true)` to retrieve applicability conditions and exceptions.
+1. Call `search_evidence(query=..., mode="high_accuracy")` and verify that the result is successful, has evidence, reports `context_completeness`, and does not contain a blocking diagnostic. Its required and supporting applicability/exception context is already included and distinguished by lineage.
+2. If an operator explicitly needs inspection material beyond the answer package, take `evidence[0].source_id` and call `get_context(source_id=..., context_level="diagnostic", include_parent=true, include_exceptions=true, include_adjacent=true)`; do not use diagnostic adjacency as normative answer evidence.
 3. Take `document_id` and `page_start` from the same evidence item and call `get_page_reference(document_id=..., page_number=...)` to obtain the catalog-bound page resource.
 4. Present `original_text` as untrusted quoted evidence, link the returned page resource, and display every typed warning. Do not claim an answer when either call reports `evidence_insufficient` or `applicability_incomplete`.
 
@@ -1203,32 +1935,33 @@ The intended build sequence is:
 
 1. Scan the inbox and registered source files.
 2. Calculate source hashes.
-3. Record current raw manifest-byte hashes for provenance, then safe-load, canonicalize, and verify approved manifest-content and source hashes and source sizes.
+3. Load and canonicalize the supported Section 12.2 core vocabulary; record current raw manifest-byte hashes for provenance, then safe-load, canonicalize, and verify approved manifest-content, vocabulary version, source hashes, and source sizes.
 4. Detect added, changed, and removed documents.
 5. Select parser routes.
 6. Produce parser-neutral artifacts for every selected route.
-7. Run each adapter's parsing validation and every required dual-parser comparison, finalize the Section 11.3 parser-validation report for both pass and failure paths, and then evaluate the blocking gate; only after the report is durable and all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents deterministically from it.
+7. Run each adapter's parsing validation and every required dual-parser comparison, finalize the Section 11.3 parser-validation report for both pass and failure paths, and then evaluate the blocking gate; only after the report is durable and all applicable gates pass, select the configured `canonical_primary` artifact and produce canonical documents plus their exact vocabulary classification-provenance records deterministically from it.
 8. Construct clause and node trees.
 9. Build the versioned node-level page-provenance artifact and validate its page counts and non-overlapping byte partitions against the source.
 10. Generate standards-aware chunks and their source rows from the canonical model plus that page-provenance artifact.
-11. Extract and resolve cross-references.
+11. Extract and resolve cross-references; derive every semantic edge ID; generate deterministic conflict candidates, attach every position's complete required context, compile its canonical position-source cover, and classify each candidate under Section 20.3; retain pre-admission `potential` transitions in diagnostics but admit only validated final conflict records.
 12. Generate lexical and embedding text.
-13. Materialize the candidate SQLite catalog through a connection that verified foreign-key enforcement, require zero rows from `PRAGMA foreign_key_check`, and run every Section 14.1 blocking validation query, including chunk/source totality, source-text and page-span reconstruction, exact-key uniqueness, clause coverage, and cross-reference integrity.
+13. Materialize the candidate SQLite catalog through a connection that verified foreign-key enforcement, require zero rows from `PRAGMA foreign_key_check`, and run every Section 14.1 blocking validation query, including vocabulary/classification/provenance consistency, chunk/source totality, source-text and page-span reconstruction, exact-key uniqueness, clause coverage, structural/semantic edge-ID and cross-reference integrity, and conflict position/state/review/canonical-source-cover integrity.
 14. Generate exactly one chunk embedding per persisted chunk in the declared deterministic row order, only after the catalog gate passes.
 15. Build lexical indexes.
 16. Build vector artifacts.
-17. Derive `build_content_id` from the canonical manifest hashes, candidate catalog and admitted derived-artifact hashes, evaluation corpus and gate versions, dependency lock, toolchain fingerprint, and reproducible build epoch; run the regression evaluation and durably persist versioned raw results bound to that deterministic ID. An execution failure produces a sanitized failure record rather than skipping report generation.
-18. Complete and finalize the static review reports with canonical-tree, chunk, cross-reference, provenance, and current-run evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
-19. Only after the current evaluation results and report are durable, enforce the documented quality gates.
-20. Confirm that no release-blocking parser, catalog, security, integrity, evaluation, or document-review finding remains open.
-21. Assemble a candidate release.
-22. Validate the release manifest and every required artifact checksum.
-23. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, and rollback smoke tests.
-24. Publish the release and atomically update the active pointer.
+17. Validate the complete Section 19 traversal rule set, edge-ID derivation, and deterministic target/conflict-position materialization covers against the candidate catalog, then materialize the versioned `lineage.json` described in Section 7.2 from the exact source, parser, vocabulary/classification, canonical, page, chunk, catalog, relationship/conflict, review, retrieval-artifact, and traversal-configuration records.
+18. Derive `build_content_id` from the canonical manifest hashes, exact evidence-vocabulary hash, candidate catalog and admitted derived-artifact hashes including `lineage.json`, context and conflict rule-set/configuration/review inputs, evaluation corpus and gate versions, dependency lock, toolchain fingerprint, and reproducible build epoch; run the regression evaluation and durably persist versioned raw results bound to that deterministic ID. An execution failure produces a sanitized failure record rather than skipping report generation.
+19. Complete and finalize the static review reports with canonical-tree, vocabulary/classification/provenance, chunk, cross-reference, conflict-candidate/state/position, and current-run evaluation sections; incorporate the already finalized parser-validation report rather than generating it for the first time here.
+20. Only after the current evaluation results and report are durable, enforce the documented quality gates.
+21. Confirm that no release-blocking parser, catalog, security, integrity, evaluation, or document-review finding remains open.
+22. Assemble a candidate release.
+23. Validate the release manifest and every required artifact checksum.
+24. Reopen the candidate through the read-only runtime and run exact-lookup, search, citation, lineage, all-side conflict, and rollback smoke tests.
+25. Publish the release and atomically update the active pointer.
 
-A failure through candidate validation at step 23 must leave `active.json` unchanged. Once step 24 begins its atomic replacement, a crash before the post-replacement directory flush may recover either the complete old or complete new record; recovery verifies the referenced release and records that observed outcome before serving. It never guesses, combines records, or exposes a missing/torn pointer, and a recovered valid new record completes the activation rather than reporting that the active release stayed old.
+A failure through candidate validation at step 24 must leave `active.json` unchanged. Once step 25 begins its atomic replacement, a crash before the post-replacement directory flush may recover either the complete old or complete new record; recovery verifies the referenced release and records that observed outcome before serving. It never guesses, combines records, or exposes a missing/torn pointer, and a recovered valid new record completes the activation rather than reporting that the active release stayed old.
 
-The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, chunk, and catalog diagnostics but produces no embedding, lexical-index, or vector-index artifact. Evaluation gate enforcement is likewise unreachable until step 18 has finalized a report bound to the same deterministic `build_content_id` and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 19 while retaining that diagnostic report. A wall-clock or random operational run ID exists only in the external operator lifecycle ledger and never enters a release-admitted report or evaluation artifact. Tests must inject failures at the catalog gate, evaluation execution and quality gate, and before and during candidate validation, proving that the required failure reports remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
+The publish step is unreachable unless every preceding gate succeeds. The step 13 catalog gate runs before any embedding or index builder is invoked and before any such derived artifact is written to the build cache; a failure may retain parser, vocabulary/classification, chunk, conflict, and catalog diagnostics but produces no embedding, lexical-index, vector-index, or lineage artifact. Evaluation gate enforcement is likewise unreachable until step 19 has finalized a report bound to the same deterministic `build_content_id` and exact raw-result hash; a metric failure or evaluation-execution failure blocks at step 20 while retaining that diagnostic report. A wall-clock or random operational run ID exists only in the external operator lifecycle ledger and never enters a release-admitted report or evaluation artifact. Tests must inject failures at vocabulary loading/classification, conflict classification/review, the catalog gate, lineage finalization, evaluation execution and quality gate, and before and during candidate validation, proving that required diagnostics remain available, downstream builders were not called where applicable, and neither the active pointer nor the previous release changes.
 
 ---
 
@@ -1254,15 +1987,28 @@ normalizer_version
 page_mapper_version
 page_provenance_artifact_sha256
 chunker_version
+cross_reference_extractor_version
 cross_reference_resolver_version
 embedding_model
 embedding_model_revision
 embedding_model_artifact_sha256
 lexical_index_version
 schema_version
+evidence_vocabulary_version
+evidence_vocabulary_sha256
+edge_identity_schema_version
+occurrence_identity_schema_version
 reproducible_build_epoch
 dependency_lock_hash
 build_toolchain_fingerprint
+lineage_schema_version
+context_rule_set_version
+context_rule_configuration_sha256
+conflict_detector_version
+conflict_rule_set_version
+conflict_rule_configuration_sha256
+unit_registry_version
+conflict_review_artifact_sha256
 ```
 
 The list above is the dependency vocabulary, not one flat cache key. Each artifact hashes only its declared inputs below, including the hashes of upstream artifacts rather than their paths.
@@ -1271,14 +2017,16 @@ The list above is the dependency vocabulary, not one flat cache key. Each artifa
 | --- | --- |
 | Parser-neutral output | Source-file hash and size; approved manifest-content hash; assigned role; adapter name, version, and configuration; parser-neutral schema version; OCR configuration and declared local asset digests; dependency-lock hash; build-toolchain fingerprint. The output hash is a result, never an input to locating this cache entry. |
 | Parser-validation report | Approved manifest-content hash; source-file hash and size; ordered tuples `(role, adapter identity, adapter version, adapter configuration, declared local-asset digests, parser-neutral artifact SHA-256)` for every selected route; every single-parser validator version/configuration; comparison-gate implementation version and configuration when enabled; report schema version. Only a passing deterministic report is promoted into this cache; all attempts retain their diagnostic copy outside it. |
-| Canonical model | Approved manifest-content hash; selected `canonical_primary` artifact SHA-256; hash of the passing parser-validation report; normalizer version and configuration; canonical schema version; dependency-lock hash; build-toolchain fingerprint. The manifest hash preserves document identity and metadata even when two manifests select identical source/parser bytes. No canonical entry is written for a failed report. |
+| Canonical model | Approved manifest-content hash; exact evidence-vocabulary version and artifact SHA-256; selected `canonical_primary` artifact SHA-256; hash of the passing parser-validation report; normalizer and classification-rule versions/configurations; canonical and classification-provenance schema versions; ordered immutable human-review artifact hashes; dependency-lock hash; build-toolchain fingerprint. The manifest hash preserves document identity and metadata even when two manifests select identical source/parser bytes. No canonical entry is written for a failed report. |
 | Page-provenance map | Canonical-model artifact hash; selected primary parser-neutral artifact SHA-256; source-file hash and size; page-mapper version, configuration, and schema version; dependency-lock hash; build-toolchain fingerprint. Its content-addressed output contains the authoritative ordered node byte spans, page numbers, and optional boxes imported at step 13. |
 | Chunks and source rows | Canonical-model artifact hash; page-provenance artifact hash; chunker version and configuration; chunk, membership, and source-projection schema versions. |
-| Cross-references | Canonical-model artifact hash; approved `reference_edition_overrides`; cross-reference resolver version and configuration; digest of only the resolver-relevant target subset. That sorted subset contains the source document, every candidate whose document code appears in a parsed external reference (all editions for an unqualified code and the named edition for a qualified code), and every document ID named by an approved override, each represented as `(document_id, document_code, edition, canonical_node_tree_hash)`. It is deterministically empty beyond the source document when no external reference or override exists. |
+| Cross-references | Canonical-model artifact hash; approved `reference_edition_overrides`; cross-reference extractor, resolver, and target-selector rule-set versions/configurations; occurrence- and edge-identity schema versions; digest of only the resolver-relevant target subset. That subset contains the source document; every exact `target_document_id` named by an approved manifest `relations` entry; every candidate whose document code appears in a parsed external reference (all editions for an unqualified code and the named edition for a qualified code); and every document ID named by an approved override. Present members use the strict entry `{state: "present", document_id, document_code, edition, canonical_node_tree_hash}`. An exact manifest/override ID absent from the candidate catalogue uses `{state: "missing", document_id}` rather than being omitted, so removal, later addition, or tree change cannot reuse a stale artifact. Entries are RFC 8785 sorted before hashing. The subset has no entry beyond the source document only when there is no manifest relation target, external source-text reference, or override. |
+| Conflict analysis | Evidence-vocabulary and canonical-model, page-provenance, chunk/source, cross-reference, and document applicability/status/type/normative-status artifact hashes; context rule-set/configuration and deterministic required-context source-cover projection hashes; sorted canonical comparison projections grouped by comparison key; detector, conflict-rule-set, unit-registry, source-modality, tolerance, comparison-projection, and conflict schema versions/configurations; ordered immutable conflict-review and precedence-rule artifact hashes. Potential candidates and final state transitions are deterministic outputs, not cache-locator inputs. |
 | Chunk embeddings | Ordered tuples `(document_id, canonical_order, chunk_id, embedding_text_hash)` from the chunk artifact in the declared row order; `embedding_scope: "chunk"`; row-order version; embedding model identifier and revision; local model-artifact SHA-256 or external-provider request parameters; embedding configuration; dependency-lock hash; build-toolchain fingerprint. |
 | Lexical index | Ordered search-text and metadata hashes from the chunk artifact; lexical-index engine, version, configuration, and schema version. |
 | Vector index | Embedding artifact hash; vector-index engine, version, distance metric, configuration, dependency-lock hash, and build-toolchain fingerprint. |
-| Release assembly | Hashes of the canonical catalogue and every admitted derived artifact; approved manifest-content hashes; release schema and configuration; evaluation-corpus and gate-result hashes; explicit reproducible build epoch; dependency-lock hash; build-toolchain fingerprint. |
+| Evidence lineage | Approved manifest-content and exact source hashes/sizes; exact evidence-vocabulary artifact hash; ordered selected parser-route provenance-envelope hashes; passing parser-validation-report hash; canonical-model/classification-provenance, page-provenance, chunk/source, catalog, cross-reference, conflict-analysis, embedding, lexical-index, and vector-index artifact hashes; lineage, occurrence-identity, and edge-identity schema versions; context/conflict rule-set, review, ordering and configuration hashes. The output excludes its own hash, `build_content_id`, `release_id`, operational IDs, and timestamps. |
+| Release assembly | Hashes of `evidence-vocabulary.json`, the canonical catalogue, and every admitted derived artifact; approved manifest-content hashes; release schema and configuration; evaluation-corpus and gate-result hashes; explicit reproducible build epoch; dependency-lock hash; build-toolchain fingerprint. |
 
 Adding, removing, or changing a resolver-relevant target edition therefore invalidates affected cross-reference artifacts even when the source PDF and its own canonical tree are unchanged; an unrelated document does not invalidate them. Downstream release assembly is invalidated by the changed cross-reference artifact hash. A raw-byte-only manifest formatting change is recorded only in the external operator lifecycle ledger and does not alter semantic cache keys or release bytes.
 
@@ -1295,7 +2043,9 @@ releases/
 └── <release_id>/
     ├── manifest.json
     ├── build-info.json
+    ├── evidence-vocabulary.json
     ├── knowledge.sqlite
+    ├── lineage.json
     ├── chunks.jsonl
     ├── embeddings.f16.npy
     ├── lexical-index/
@@ -1318,6 +2068,11 @@ The release manifest records:
 - reproducible build epoch;
 - document and chunk counts;
 - schema version;
+- exact ClauseSift Engineering Evidence Vocabulary version, path, and SHA-256;
+- sorted extension namespace/schema-version/schema-hash tuples, empty when no extension is admitted;
+- lineage-schema version and `lineage.json` artifact hash;
+- occurrence- and edge-identity schema versions plus context rule-set, ordering, limit values, and canonical configuration hash;
+- conflict detector/rule/schema, dimension/explanation/modality vocabulary, unit registry, tolerances, ordered review/precedence artifact hashes, and counts by state/dimension/touched tier;
 - parser and chunker versions;
 - embedding and reranker model identifiers, revisions, formats, and complete asset hashes;
 - chunk-embedding scope, row count, row-order version, vector dimensions, dtype, and normalization state;
@@ -1332,7 +2087,7 @@ The immutable `reproducible_build_epoch` is an explicit integer input using `SOU
 
 ClauseSift v0.1 represents the active release with a canonical JSON regular file named `active.json`, containing exactly the release ID and complete manifest digest; a symlink is not an activation pointer. Activation writes a complete sibling temporary file on the same filesystem, flushes that file, atomically replaces `active.json`, and then flushes the parent directory with the platform's documented durability primitive. Activation is successful only after the post-replacement directory flush completes; an orphaned temporary file is never authority and is discarded during recovery. A reader opens and parses one `active.json` snapshot and then verifies that exact manifest digest; it never combines fields from separate reads. Rollback uses the identical protocol. A platform without proven atomic-replacement and post-replacement-directory-flush primitives for this file form is unsupported.
 
-Before activation, the builder verifies every required artifact and writes the manifest digest into the temporary `active.json` described above. Checksums protect against accidental corruption and partial replacement. The local single-user v0.1 threat model does not claim authenticity against an attacker who can rewrite both a release and `active.json`; signed release manifests and an external trust root are required before releases are distributed across trust boundaries.
+Before activation, the builder verifies every required artifact; validates the exact supported `evidence-vocabulary.json` and catalog classification/provenance agreement; validates `lineage.json` against the declared lineage-schema version; proves that every catalog source has exactly one matching lineage record and every lineage reference names an admitted artifact; verifies the complete Section 19 traversal rules, bounds, ranks, required-node covers, and configuration hashes; and reruns the Section 20.3 conflict candidate, state, side, review, precedence, source-cover, tier-policy, and manifest-summary checks. It then writes the manifest digest into the temporary `active.json` described above. Checksums protect against accidental corruption and partial replacement. The local single-user v0.1 threat model does not claim authenticity against an attacker who can rewrite both a release and `active.json`; signed release manifests and an external trust root are required before releases are distributed across trust boundaries.
 
 ---
 
@@ -1352,7 +2107,7 @@ Recommended strategy:
 
 This design retains fast warm queries without creating unnecessary startup memory pressure.
 
-At process startup, the runtime reads `active.json` once, verifies its manifest digest, then verifies the checksum, byte size, and expected type of every release artifact it may open. It performs these checks before opening SQLite, indexes, release page files, or arrays. External originals follow the on-demand hash, size, containment, and symlink checks in Sections 22.1 and 26. A mismatch fails startup with `release_integrity_failed`; the runtime never falls back to an older or partially readable artifact without an explicit operator rollback.
+At process startup, the runtime reads `active.json` once, verifies its manifest digest, then verifies the checksum, byte size, and expected type of every release artifact it may open. Before opening SQLite it requires an explicitly supported evidence-vocabulary version, validates the core-only `evidence-vocabulary.json` against its canonical built-in definition/hash contract, and rejects every unknown core value in that artifact. It then opens the checksum-verified catalog read-only, verifies all document/node/classification values and provenance against that vocabulary, rejects every invalid or unsupported behavior-bearing extension, and validates the complete `lineage.json`, its declared schema version, referenced artifact and classification-provenance hashes, one-to-one source coverage, exact Section 19 rule-set/configuration hashes, and every Section 20.3 conflict record/review/position/source-cover plus manifest count before accepting a query. Evidence serialization, traversal, and conflict closure read only those validated immutable representations. It performs these checks before opening indexes, release page files, or arrays. External originals follow the on-demand hash, size, containment, and symlink checks in Sections 22.1 and 26. A mismatch fails startup with `release_integrity_failed`; the runtime never falls back to an older or partially readable artifact without an explicit operator rollback.
 
 Page-resource reads share a fixed 67,108,864-byte process working-set budget in v0.1, in addition to the request-count limit below. Before opening a source, the handler computes and atomically reserves `catalog_source_size + 1 + exact_serialized_response_size`; the extra byte is the bounded oversize probe used below. If the release-time response bound would be exceeded, catalog metadata is inconsistent and the read follows `source_hash_mismatch`, while temporary budget exhaustion returns the same both-revision `-32000` `Server busy` admission error defined below with safe reason `response_byte_budget`. No source buffer, probe, base64 value, or outbound frame is allocated before reservation, and the reservation is released on every terminal path.
 
@@ -1394,7 +2149,9 @@ The report should expose:
 - table structure;
 - OCR status;
 - parser and validation warnings;
-- extracted cross-references.
+- exact evidence-vocabulary version/hash plus every document/node classification, origin, supporting span/ancestor/manifest, rule/review ID, and unresolved state;
+- extracted cross-references;
+- every conflict candidate transition, final state/dimension, exact source position, explanation/precedence rule, review hash, and touched-tier gate result.
 
 This provides the most valuable document-inspection capability of a large RAG platform without its operational infrastructure.
 
@@ -1412,13 +2169,16 @@ The evaluation corpus should contain real questions covering:
 - exact clause identifiers;
 - definitions;
 - scope and applicability;
-- mandatory requirements;
+- `required`, `prohibited`, `recommended`, and `permitted` source modalities without legal-force inference;
 - exceptions;
 - informative notes;
 - table values and units;
 - product model numbers and parameters;
 - cross-clause references;
 - cross-document references;
+- scope-plus-exception, table-row, definition, dependency-chain, cycle, unresolved-target, and cross-edition context traversals with versioned expected source IDs and edge paths;
+- confirmed numeric/normative conflicts, compatible stricter requirements, unit-equivalent values, valid exceptions, amendment/supersession changes, disjoint jurisdictions/effective intervals/equipment classes, missing applicability, parser extraction disagreement, three-way conflicts, trusted precedence, and no-precedence cases with versioned expected candidates/states/positions;
+- every Section 12.2 document type, node type, normative status, source modality, origin, and inheritance branch, including all worked edge cases, `unclassified`/`unknown`, forbidden composite aliases, and unsupported core/extension versions;
 - version differences;
 - unanswerable questions;
 - ambiguous questions;
@@ -1438,6 +2198,21 @@ The evaluation corpus should contain real questions covering:
 - correct-clause rate
 - correct-page rate
 - table-evidence hit rate
+- required-context recall by source ID
+- context-path fidelity by ordered edge-ID sequence
+- optional-context precision
+- over-expansion rate and evidence expansion factor
+- prohibited-edge and cross-edition-contamination count
+- byte-identical context ordering rate
+- conflict-candidate recall
+- confirmed/unresolved conflict precision
+- explained-difference precision by explanation code
+- conflict state/dimension/position accuracy
+- all-material-side preservation rate
+- false precedence-selection and model-only-confirmation count
+- document-type, node-type, normative-status, and source-modality accuracy
+- classification-provenance and inheritance fidelity
+- unknown-to-stronger-value coercion and legacy-alias acceptance count
 
 ### 29.3 End-to-end metrics
 
@@ -1446,19 +2221,22 @@ The evaluation corpus should contain real questions covering:
 - unsupported assertion rate;
 - refusal accuracy;
 - version-selection accuracy;
-- document-type interpretation accuracy;
-- context completeness.
+- evidence-vocabulary interpretation accuracy;
+- context completeness;
+- context over-inclusion and status preservation;
+- conflict recognition, explanation, uncertainty, and no-winner compliance.
 
 Metric ownership is explicit:
 
 | Metric family | Authoritative grader |
 | --- | --- |
-| Recall, rank, document, edition, clause, page, and table-hit metrics | Executable comparison of returned catalog IDs and ranks against versioned expected IDs. |
+| Recall, rank, document, edition, clause, page, table-hit, context-source, context-path, ordering, prohibited-edge, and cross-edition metrics | Executable comparison of returned catalog IDs, ranks, context classes, ordered edge paths, statuses, and complete canonical output against versioned expected values. |
 | Citation accuracy and version-selection accuracy | Executable validation of citation fields, source hashes, and selected edition against the catalog and golden label. |
 | Refusal accuracy | Executable confusion matrix against independently human-labeled answerability. |
 | Evidence support and unsupported assertion rates | Blinded human claim-to-evidence rubric with claim-level labels. |
-| Document-type interpretation accuracy | Blinded human rubric against the manifested document role and the claim made. |
-| Context completeness | Blinded human rubric covering required parents, definitions, exceptions, tables, and direct references. |
+| Evidence-vocabulary interpretation accuracy | Executable equality against manifested document classifications and versioned node/provenance fixtures is authoritative for deterministic cases. Blinded human review establishes source-grounded golden labels for genuinely semantic node type, normative status, and modality cases; it judges whether client prose preserves those values without adding legal force. |
+| Context completeness and over-inclusion | Executable expected-set/path comparison is authoritative where the golden case names exact catalog IDs; blinded human review covers whether the versioned expected set itself correctly classifies required, supporting, and irrelevant engineering context. |
+| Conflict candidate/state/dimension/position, all-side preservation, and precedence-policy metrics | Executable comparison against versioned exact conflict records is authoritative for deterministic numeric/unit/relation/metadata cases. Blinded human review establishes the golden label for normative-language incompatibility, explanation, shared applicability, and whether a precedence conclusion is supported. |
 
 The human rubric and label set are versioned. Two blinded reviewers independently label every initial release-gate item; after the first release, the second reviewer covers a preregistered stratified sample of at least 20%, every gate failure, and every item the primary reviewer marks uncertain. Each release cycle also intermixes a versioned blinded calibration set, excluded from product metrics, containing at least 10 independently adjudicated examples of every rubric category. Both reviewers label every calibration item without seeing its reference label.
 
@@ -1472,11 +2250,21 @@ These are internal targets, not external industry standards:
 - expected evidence present in Recall@20: one-sided 95% Wilson lower confidence bound at least 98%;
 - expected evidence present in Top 5: one-sided 95% Wilson lower confidence bound at least 95%;
 - document, edition, clause, and page citation accuracy: zero failures across the complete versioned deterministic citation suite;
-- unsupported deterministic conclusions in the golden set: zero observed failures.
+- unsupported deterministic conclusions in the golden set: zero observed failures;
+- required context, lineage paths, source status, and deterministic ordering: zero failures across the complete versioned traversal conformance suite;
+- prohibited, unresolved, guessed, or wrong-edition traversal: zero accepted edges across the complete versioned negative suite;
+- core vocabulary/schema, document-dimension separation, classification provenance/inheritance, public round trip, legacy-alias rejection, unsupported-version rejection, and extension-isolation conformance: zero failures across the complete deterministic vocabulary suite;
+- node-type, normative-status, and source-modality classification accuracy: one-sided 95% Wilson lower confidence bound at least 98% for each field on the independently labeled classification corpus;
+- `unclassified`/`unknown` values promoted to a stronger classification, informative material promoted by attachment/ranking, or source modality reported as project-specific legal force: zero occurrences across the complete negative suite;
+- optional-context precision: one-sided 95% Wilson lower confidence bound at least 95%, with the expansion factor reported by mode and node/relation family;
+- conflict-candidate recall: one-sided 95% Wilson lower confidence bound at least 95%;
+- confirmed/unresolved conflict precision and explained-difference precision: one-sided 95% Wilson lower confidence bound at least 98% for each reported state/code family;
+- conflict position/source/lineage completeness, all-side runtime preservation, state/dimension ordering, and trusted-precedence serialization: zero failures across the complete deterministic conflict conformance suite;
+- explained exception/version/jurisdiction/scope/unit/modality cases misreported as confirmed conflict, unresolved or model-only candidates promoted without admissible review, and winner selection without encoded precedence: zero occurrences across the complete negative suite.
 
 Quality gates may be revised only through documented evidence.
 
-Phase 0's 30-50 questions are an exploratory seed, not a statistically precise release gate. For the two probabilistic retrieval gates, the evaluation plan uses independent labeled cases and a one-sided 95% Wilson interval; at least 150 applicable cases are required for the 98% gate and at least 60 for the 95% gate, with larger stratified samples required when a critical query category would otherwise be underrepresented. A percentage is never reported without its numerator and denominator, and a release does not pass when the lower bound misses the target. The 100% and zero-failure criteria are deterministic conformance count gates rather than claims that a finite confidence interval proves population perfection; they report the complete suite size and every failure.
+Phase 0's 30-50 questions are an exploratory seed, not a statistically precise release gate. For the probabilistic retrieval, classification, optional-context, and conflict gates, the evaluation plan uses independent labeled cases and a one-sided 95% Wilson interval; at least 150 applicable cases are required for each 98% gate and at least 60 for each 95% gate, with larger stratified samples required when a critical query, classification field/origin, context rule, conflict dimension/state, or hard negative would otherwise be underrepresented. A percentage is never reported without its numerator and denominator, and a release does not pass when the lower bound misses the target. The 100% and zero-failure criteria are deterministic conformance count gates rather than claims that a finite confidence interval proves population perfection; they report the complete suite size and every failure.
 
 ---
 
@@ -1527,6 +2315,17 @@ Initial categories:
 - `release_integrity_failed`
 - `parser_failed`
 - `ocr_low_confidence`
+- `parser_comparison_difference`
+- `classification_unresolved`
+- `source_coordinate_incomplete`
+- `context_incomplete`
+- `context_truncated`
+- `context_cycle_detected`
+- `context_status_boundary`
+- `context_limit_exceeded`
+- `evidence_conflict`
+- `conflict_unresolved`
+- `conflict_review_required`
 - `clause_sequence_anomaly`
 - `table_structure_anomaly`
 - `cross_reference_unresolved`
@@ -1556,10 +2355,29 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `release_integrity_failed` | Runtime quarantine transition for a snapshotted admitted `resources/read` still `pending` | blocking | JSON-RPC `-32603` with safe diagnostic data and no contents is attempted |
 | `parser_failed` | Parse subprocess failure or invalid parser-neutral output | blocking | Build/review report |
 | `ocr_low_confidence` | Parse OCR quality review | advisory | Build/review report |
+| `ocr_low_confidence` | Runtime lineage assembly for admitted OCR evidence below the advisory threshold | advisory | In-band warning on the affected evidence item and successful tool result |
+| `parser_comparison_difference` | Parse comparison passes with a non-zero below-threshold difference | advisory | Build/review report |
+| `parser_comparison_difference` | Runtime lineage assembly for evidence from an admitted document with a below-threshold parser difference | advisory | In-band warning on the affected evidence item and successful tool result |
+| `classification_unresolved` | Parse/canonical classification of a `release_tier: standard` source-bearing node cannot deterministically resolve node type, normative status, or source modality | advisory | Build/review report plus `unclassified`/`unknown` catalog and lineage records; no type-dependent semantic edge is created |
+| `classification_unresolved` | Build/release validation finds document-level `normative_status: unknown` or `unclassified`/`unknown` on any source-bearing node in a `release_tier: critical` document | blocking | Build/release report and non-zero builder exit; no release is assembled |
+| `classification_unresolved` | Runtime evidence assembly selects an admitted `release_tier: standard` `unclassified` or `unknown` node | advisory | In-band warning on the affected evidence item and successful result; exact conservative values are preserved, and completeness is `incomplete_required` when the field was needed for a required rule |
+| `source_coordinate_incomplete` | Runtime lineage assembly for source text whose validated page mapping has no complete bounding-box coverage | advisory | In-band warning on the affected evidence item and successful tool result |
+| `context_incomplete` | Runtime required traversal encounters a non-resolved required occurrence with no target | advisory | In-band warning with `context_completeness: "incomplete_required"` on the affected item and successful tool result |
+| `context_truncated` | Runtime supporting or diagnostic traversal reaches a context-object, path, step, or response-byte bound | advisory | In-band warning with `context_completeness: "truncated_optional"` on the affected result and successful tool result |
+| `context_cycle_detected` | Runtime reaches the first repeated node on an allowed `references` or `depends_on` path | advisory | In-band warning on the affected evidence item and successful tool result; the repeated step is not followed |
+| `context_status_boundary` | Runtime seed or explicit traversal target is superseded/withdrawn, or crosses editions of one document code without version-comparison intent | advisory | In-band warning on the affected evidence item or metadata-only context target and successful tool result; no edition substitution occurs |
+| `context_limit_exceeded` | Runtime evidence-returning tool's complete required traversal would exceed a semantic-depth, item, path, step, or serialized-byte bound | blocking | Exactly one `isError: true` tool result; no partial Evidence Package is emitted |
+| `context_limit_exceeded` | Runtime `resources/read` of a canonical clause whose complete required traversal would exceed a declared bound | blocking | JSON-RPC `-32603` with the safe diagnostic data in Section 22.4 and no contents |
+| `evidence_conflict` | Runtime graph/conflict closure selects any position of a `confirmed` conflict | advisory | In-band warning on every returned material position and successful result; the complete conflict object is present |
+| `conflict_unresolved` | Build classification of a complete standard-only conflict whose applicability or incompatibility remains unresolved | advisory | Build/review report and immutable conflict record |
+| `conflict_unresolved` | Runtime graph/conflict closure selects any position of an admitted `unresolved` conflict | advisory | In-band warning on every returned known position and successful result; the complete conflict object is present |
+| `conflict_review_required` | Build/release classification leaves an unresolved conflict touching any `release_tier: critical` document | blocking | Build/release report and non-zero builder exit; no release is assembled |
 | `clause_sequence_anomaly` | Parse structural validation | advisory | Build/review report |
 | `table_structure_anomaly` | Parse structural validation | advisory | Build/review report |
-| `cross_reference_unresolved` | Build reference resolution for a `standard` document | advisory | Build/review report; the unresolved row has no navigable target |
-| `cross_reference_unresolved` | Release validation for any non-resolved row in a `critical` document | blocking | Release report and non-zero builder exit |
+| `table_structure_anomaly` | Runtime required traversal from an admitted table/row cannot supply validated title, header, unit, or parent structure | advisory | In-band warning with `context_completeness: "incomplete_required"` on the affected item and successful tool result; no structure is inferred |
+| `cross_reference_unresolved` | Build reference resolution for a `release_tier: standard` document | advisory | Build/review report; the unresolved row has no navigable target |
+| `cross_reference_unresolved` | Runtime requested traversal observes a non-resolved occurrence in a shipped `release_tier: standard` document | advisory | In-band warning on the affected seed and successful tool result; no target or path is invented |
+| `cross_reference_unresolved` | Release validation for any non-resolved row in a `release_tier: critical` document | blocking | Release report and non-zero builder exit |
 | `edition_conflict` | Build extracted-versus-manifest reconciliation | blocking | Build/review report |
 | `document_status_unknown` | Manifest registration | blocking | Build/review report |
 | `applicability_incomplete` | Runtime evidence assembly | advisory | In-band warning on a successful tool result |
@@ -1567,6 +2385,8 @@ Every emitted diagnostic includes `phase` (`manifest`, `parse`, `build`, `releas
 | `release_validation_failed` | Release candidate gate | blocking | Release report and non-zero builder exit |
 | `request_cancelled` | Runtime honored MCP cancellation | blocking | Non-response runtime event and cancellation metric; no tool result is emitted |
 | `request_deadline_exceeded` | Runtime server-enforced overall tool-call deadline | blocking | Exactly one `isError: true` tool result; no partial or later response |
+
+Context, classification, and conflict diagnostics use code-owned messages and closed safe details. `classification_unresolved` allows only stable document/node/source IDs, classification field, exact conservative value, origin, safe rule/review ID, and `lineage_stage`; `context_incomplete` and runtime `cross_reference_unresolved` allow only `relation_type`, stable occurrence ID, and `lineage_stage`; runtime `table_structure_anomaly` allows only stable table/row node IDs, a closed missing-component enum, and `lineage_stage`; `context_truncated` and `context_limit_exceeded` allow only `bound_name`, positive configured/observed counts, operation, and `lineage_stage`; `context_cycle_detected` allows only stable seed, node, and edge IDs plus relation type; `context_status_boundary` allows only stable seed/target document IDs, optional target node ID, source/target status, and `lineage_stage`; and `evidence_conflict`, `conflict_unresolved`, and `conflict_review_required` allow only conflict/position/source IDs, ordered dimensions, state, precedence status, and `lineage_stage`. They never include raw reference text, comparison projections, review notes, query text, document text, paths, parser output, or exception strings.
 
 The JSON-RPC errors for malformed requests, unknown methods, malformed/non-canonical resource URIs, and canonical `resources/read` misses are protocol-owned errors, not ClauseSift diagnostic codes. Warnings use the object contract from Section 21. Tool errors use the same stable code vocabulary plus a human-readable message and optional safe details. In addition to each tool's row-specific domain errors in Section 22, any tool call may return `request_deadline_exceeded` under the universal deadline contract above. Tests must exercise every routing-table row, distinguish the both-revision `-32602` malformed-URI route from the revision-specific canonical-miss wire codes, assert absence of an empty-content fallback, verify that honored cancellation emits no tool response, and deterministically exercise cancellation/deadline/quarantine races without a duplicate response.
 
@@ -1613,7 +2433,7 @@ Every build should record:
 
 Runtime logs should support debugging retrieval without storing sensitive queries by default. `log_queries` and `log_evidence_text` are separate explicit options and both default to false; enabling query logging never enables evidence logging. Runtime logs and optional query telemetry are written to an operator-selected state directory outside immutable releases and outside `knowledge.sqlite`; release directories remain read-only. Logs use structured event types, redact paths and credentials before dispatch to any sink, and normally record only release ID, retrieval mode, stage timings, warning codes, and request correlation ID. Credentials and absolute/internal paths are never loggable even when either content option is enabled.
 
-Audit history has two explicitly bounded chains so an immutable release never claims to contain events that occur after it is sealed. The embedded build ledger is append-only, sequence-numbered, and hash-chained through completion of step 20, but contains only deterministic event data, `build_content_id`, phase sequence numbers, artifact hashes, and the explicit reproducible build epoch—never a random run ID or wall-clock observation. It is then sealed as `build-ledger.jsonl`, and its terminal hash is recorded in the release manifest. A separate operator lifecycle ledger outside the release directory records an operational run ID, actual build start/finish and failures, candidate assembly, manifest/checksum validation, smoke-test outcome, publication, active-pointer switch, rollback, and recovery with wall-clock times. That external chain begins with the operational run ID; when available it anchors `build_content_id`, after step 20 it anchors the terminal build-ledger hash, and after assembly it anchors `release_id` and the complete manifest digest. Every later entry links to its predecessor. Build, assembly, or activation failure can therefore be recorded without mutating candidate bytes, and “terminal” always names a declared chain cutoff rather than future events. Runtime diagnostic and optional query logs are not presented as either audit chain and need not share their retention policy.
+Audit history has two explicitly bounded chains so an immutable release never claims to contain events that occur after it is sealed. The embedded build ledger is append-only, sequence-numbered, and hash-chained through completion of step 21, but contains only deterministic event data, `build_content_id`, phase sequence numbers, artifact hashes, and the explicit reproducible build epoch—never a random run ID or wall-clock observation. It is then sealed as `build-ledger.jsonl`, and its terminal hash is recorded in the release manifest. A separate operator lifecycle ledger outside the release directory records an operational run ID, actual build start/finish and failures, candidate assembly, manifest/checksum validation, smoke-test outcome, publication, active-pointer switch, rollback, and recovery with wall-clock times. That external chain begins with the operational run ID; when available it anchors `build_content_id`, after step 21 it anchors the terminal build-ledger hash, and after assembly it anchors `release_id` and the complete manifest digest. Every later entry links to its predecessor. Build, assembly, or activation failure can therefore be recorded without mutating candidate bytes, and “terminal” always names a declared chain cutoff rather than future events. Runtime diagnostic and optional query logs are not presented as either audit chain and need not share their retention policy.
 
 ---
 
@@ -1621,26 +2441,31 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 
 ### 34.1 Unit tests
 
-- manifest validation, including canonical `sha256:<64-lowercase-hex>` form, rejection of placeholders that do not match the selected source, semantic approval invalidation on canonical-content or source change, acceptance plus provenance logging of raw comment, whitespace, encoding, or key-order-only changes, and exact acceptance of the closed `active`, `superseded`, and `withdrawn` status enum with `document_status_unknown` for every other token;
-- canonical model validation;
+- manifest validation, including canonical `sha256:<64-lowercase-hex>` form, rejection of placeholders that do not match the selected source, semantic approval invalidation on canonical-content or source change, acceptance plus provenance logging of raw comment, whitespace, encoding, or key-order-only changes, exact evidence-vocabulary-version binding, exact acceptance of the Section 12.2 document-type/normative-status and `active`/`superseded`/`withdrawn` status enums, rejection of legacy composite aliases, and `document_status_unknown` for every other status token;
+- canonical model and ClauseSift Engineering Evidence Vocabulary validation, including every document/node enum/cardinality, definition, classification origin/provenance shape, deterministic recomputation, inheritance branch, extension namespace rule, unsupported-version/core-token failure, and stored-versus-derived mismatch;
 - text normalization;
 - clause-number parsing, normalization, nullable non-addressable semantics, and rejection of duplicate exact-addressable `(document_id, clause_number)` keys;
-- every parser-validation heuristic listed in Section 11.3, including deterministic primary selection for a passing below-threshold disagreement, a standard document with enabled comparison mode using the same ordered-role and blocking-gate contract, and cache invalidation when parser roles change;
+- every parser-validation heuristic listed in Section 11.3, including deterministic primary selection for a passing below-threshold disagreement, a `release_tier: standard` document with enabled comparison mode using the same ordered-role and blocking-gate contract, and cache invalidation when parser roles change;
 - citation generation;
 - query token detection;
 - rank fusion;
-- context expansion rules, including required empty arrays for false include flags and true flags with no matching relation, plus a multi-node source chunk whose every member contributes context under deterministic semantic deduplication and ordering;
-- exact clause lookup returning every covering chunk by the recomputed dense persisted order across independently chunked subclauses, overlapping whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks and rejection of a candidate chunk containing any retrievable out-of-subtree member or members from two independently addressable branches;
-- rejection of duplicate source mappings, release-admitted chunks with no source, invalid/escaping source locators or mismatched source sizes, null or empty chunk `original_text`, incorrect deepest-common-ancestor citation nodes, invalid member spans or ordering, reconstructed-text mismatches, missing, overlapping, duplicate, gapped, out-of-order, or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the authoritative mapping projection, exact-lookup clauses with no chunk, and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage;
-- cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases, including rejection of an existing but semantically wrong target node, code, edition, or document-root target; resolved rows compare parsed code and edition with joined targets, while unresolved rows retain parsed evidence with null target IDs/projections and perform no joined-field equality check;
+- every Section 19 context profile and rule-table row, including inclusive context levels; required-first queue ordering; required recursion versus direct supporting/diagnostic stops; required empty nested arrays for false `get_context` flags and true flags with no matching relation; a multi-node seed whose every member contributes; deterministic node-qualified scope-contained target-cover materialization, including two subtree nodes whose memberships both start at byte zero, a selected multi-node source contributing coverage to each matching node, and release rejection when an atomic target has only a broader multi-node cover; exact metadata-only projection and path retention for empty structural/document targets; duplicate-source/target preservation; the same edge sequence retained once per distinct context class; a diamond `A -> B1/B2 -> C -> D` retaining both complete paths at `C` and `D`; exact-duplicate path-state suppression; exact path, object, step, and depth boundaries under reconvergence; allowed-cycle suppression; optional truncation; required-limit error; unresolved-required incompleteness; and status/edition isolation;
+- Evidence Lineage schema closure and canonical ordering: exact source/manifest/vocabulary hashes and sizes, every contributing node's three classification records and provenance hashes, ordered multi-node and multi-page byte spans, coordinate-status derivation, selected parser roles and transformation hashes, exact edge-identity/context/conflict version and configuration bindings, chunk/source ownership, retrieval-artifact references, direct/expanded/conflict selection roles, and unique independent context paths/reasons; require a critical/comparison-mode document to carry ordered distinct primary/comparator artifacts plus a `passed_*` status, allow `not_required` only for an approved standard-tier single route, retain otherwise identical edge sequences when their context classes differ, and reject a missing, extra, renamed, or release-mismatched rule-set field, any other missing or unknown field, wrong classification/value/origin/order, wrong ownership, a nonexistent or incorrectly derived edge/occurrence, a missing/extra/duplicate/misassigned/out-of-order origin group or occurrence, the obsolete scalar-origin step shape, unresolved-target traversal, an exact duplicate `(seed source, context class, edge-ID sequence)` path, a direct-only item with a path, or a context-only item without one;
+- exact clause lookup returning every chunk in the Section 14.1 exact-lookup set by the recomputed dense persisted order, without a minimal-cover or complete-chunk shortcut, across independently chunked subclauses, an overlapping whole-clause chunk plus its mandatory atomic chunks, whole-table and row representations, semantic boundaries, and token-limit splits without aggregating source IDs, including an empty structural clause root covered solely by descendant chunks and rejection of a candidate chunk containing any retrievable out-of-subtree member or members from two independently addressable branches;
+- rejection of duplicate source mappings, release-admitted chunks with no source, invalid/escaping source locators or mismatched source sizes, null or empty chunk `original_text`, incorrect deepest-common-ancestor citation nodes, invalid member spans or ordering, reconstructed-text mismatches, missing, overlapping, duplicate, gapped, out-of-order, or out-of-range node-page mappings, stored source spans or bounding boxes that differ from the authoritative mapping projection, and lineage page spans that differ from the exact mapping intersections. Partial-node token-limit fixtures split within one page and across a page boundary and require complete clipped coverage of only the contributed membership interval; whole-node padding, an unclipped boundary, a gap, overlap, or extra mapping is rejected. Exact-lookup clauses with no chunk and retrievable clause-subtree nodes with missing-prefix, interior-gap, or missing-suffix byte coverage are likewise rejected;
+- cross-reference resolution for same-document, exact-edition, manifest-override, unqualified-unique, and two-edition-ambiguous cases; all three tagged selectors; same- and cross-document canonical-node selectors for paragraph, requirement, exception, and table-row targets; optional addressable-clause scoping; and missing or ambiguous node candidates. Fixtures independently recompute selectors and reject an existing but semantically wrong target node, wrong document ownership, out-of-clause target, wrong endpoint category, missing or cross-document occurrence anchor, altered occurrence or target-token span/hash, wrong selector-input object/hash, sparse/wrong explicit-target ordinal, duplicate selector input at one token, duplicate manifest relation entry, wrong manifest-entry hash, wrong logical source-node projection, stale rule/configuration/provenance, manifest-origin non-addressable selector, wrong code or edition, and wrong document-root target. Resolved rows compare parsed code and edition with joined targets, while unresolved rows retain non-navigable parsed/selector evidence with null target IDs/projections and perform no joined-field equality check;
+- every Section 20 relationship direction, exact Section 12.2 endpoint category, origin, cross-document rule, semantic identity, source-endpoint derivation, and cycle policy; byte-exact v1 occurrence-ID derivation for both origins, including the published exception fixture, and edge-ID derivation for `contains`, `precedes`, and every semantic relation; occurrence-ID stability across resolution-status/candidate/endpoint changes, manifest relation-array reorder, and insertion/reordering of another explicit target when the occurrence's own immutable identity inputs are unchanged; edge-ID stability across identical rebuilds and repeated semantic occurrences; distinct occurrence IDs after a changed origin, relation, logical source, source/target span or hash, selector input, manifest entry, or occurrence-identity version; distinct edge IDs after a changed relation type, endpoint, or edge-identity version; and rejection of a malformed prefix, wrong digest, collision, endpoint mismatch, arbitrary allocated occurrence ID, or unresolved occurrence carrying an edge ID. Origin fixtures require the exact empty structural group, one-source-origin semantic groups, a coalesced `source_text` plus `manifest` edge with both non-empty occurrence groups and no lost provenance, and several explicit targets sharing one phrase/range but receiving deterministic distinct occurrence IDs. Other fixtures cover paragraph sources for `depends_on` and `applies_subject_to`; exception-source applicability and dependency traversal reached after reverse `exception_to`, including a `subclause` dependency target; paragraph and subclause applicability targets; structural/document/appendix applicability scopes; paragraph-anchored supersession and amendment phrases normalized to their source document roots, with each relation coalesced only with an exact matching manifest-authorized edge; rejection or non-navigation for a missing manifest edge, wrong occurrence anchor, mismatched relation/source root/target document/target selector result, or non-root version-edge source projection, including a text-only amendment that must not explain a conflict; paragraph targets for reverse `exception_to`; rejection of `condition` as a non-canonical endpoint token; duplicate occurrences preserved behind one runtime edge; explicit multi-target citations split into individual edges; ambiguous candidates producing no edge; allowed bounded reference/dependency cycles; forbidden structural/governing cycles; `unclassified` exclusion from typed endpoints; and unknown relation types failing release validation;
+- every Section 20.3 candidate/state/dimension/explanation/precedence rule using exact unit conversions and modality-set intersections; fixtures cover every release-admissible closed dimension and reject `parser_extraction` as a conflict dimension, compatible stricter minima/maxima, empty intersections, unit equivalence, exception, amendment, supersession, disjoint and missing jurisdiction/effective interval/equipment class, `required` versus `recommended` provisions across code/standard/manufacturer document types, two- and three-position records, and natural-language candidates that remain unresolved without immutable review;
+- conflict catalog invariants and independent release recomputation: content-addressed candidate/position IDs, dense dimensions/positions/non-overlapping spans, UTF-8 ownership, exact per-span text hashes, exact compiled position-source rows and dense selection order, complete source cover, exact comparison and required-context projections, potential-state rejection, decision/review hash binding, controlling-position membership, model-only-confirmation rejection, standard-only unresolved admission, critical unresolved blocking, and invalidation after a same-offset source edit, manifest/classification change, applicability/exception edge change, detector/rule/context-configuration change, or review change. Cover fixtures include overlapping whole-clause, atomic, and token-split candidates; prefer a contained candidate at the same uncovered coordinate; use the least-extraneous broader fallback only when none is contained; independently cover equal local offsets in different nodes; reject a gap, non-advancing candidate, altered selection order, missing/extra source, and runtime substitution of an intersecting retrieval seed outside the compiled cover. Strict response fixtures cover both deterministic and human-reviewed decisions with the same complete candidate-generation provenance, reject the obsolete ambiguous comparison-rule/configuration fields, and reject every missing or catalog-mismatched qualified provenance field;
 - global identifier scope, ownership-preserving composite foreign keys, rejection of cross-document source/chunk and source-node/document pairs, and registration/generation/schema/release rejection of every public catalog ID outside the exact 1-128-character opaque-ID grammar;
 - exact-maximum and one-over 128-Unicode-scalar values, including multibyte values, for persisted document codes, editions, non-null clause numbers, jurisdictions, and disciplines at registration or parser validation, schema insertion, cache import, and the independent release gate; null clause numbers remain valid, maximum values round-trip through search, exact lookup, clause-resource parsing, output validation, and cursor resume, while over-limit values publish no derived artifact or active release;
 - connection-factory enforcement and readback of `PRAGMA foreign_keys = ON`, runtime `query_only`, zero-row builder/runtime `foreign_key_check`, and rejection of a deliberately injected ownership violation created through an external enforcement-disabled fixture connection;
 - one-root node-tree reachability and acyclicity, parent-before-child ordering, reciprocal immediate previous/next links, and rejection of self-parent, multi-node parent-cycle, disconnected-node, and cyclic chunk-parent fixtures;
-- target-node/document consistency and every `resolution_status` constraint;
+- target-node/document/scope consistency, selector-kind conditional fields, and every `resolution_status` constraint;
 - tier-specific cross-reference severity and release-gate selection;
-- per-artifact cache-key dependency selection, semantic manifest invalidation without raw-format over-invalidation, parser-neutral/report/canonical/page-provenance/chunk cache layering, adapter-provenance invalidation even when output bytes match, same-source manifests with different document identity never colliding, page-mapper invalidation, parser-role and comparison-configuration invalidation, and resolver-relevant target-catalogue invalidation without unrelated-document churn;
-- release checksum verification;
+- per-artifact cache-key dependency selection, semantic manifest invalidation without raw-format over-invalidation, evidence-vocabulary/classification-rule/review invalidation, parser-neutral/report/canonical/page-provenance/chunk cache layering, adapter-provenance invalidation even when output bytes match, same-source manifests with different document identity never colliding, page-mapper invalidation, parser-role and comparison-configuration invalidation, and resolver-relevant target-catalogue invalidation without unrelated-document churn. Cross-reference fixtures include a manifest-only relation target and require a cache miss/rebuild when that exact target is removed or its canonical tree changes, while an unrelated document change remains a hit;
+- release checksum verification, including the exact supported `evidence-vocabulary.json` bytes/version/hash before catalog interpretation;
+- lineage release validation, including one record per catalog source; complete admitted-artifact references; deterministic invalidation for a changed source, manifest, parser route, transformation, index, schema, or assembly input; byte-identical reuse for unchanged inputs; and rejection of a missing, extra, truncated, unknown-version, checksum-invalid, or catalog-inconsistent `lineage.json`;
 - identifier and path-containment validation;
 - central response-field and diagnostic-detail allowlists, including path injection as an extra field and inside allowed structured and legacy string fields;
 - every Section 31 routing-table row and cancellation outcome;
@@ -1651,13 +2476,19 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 
 - parser adapter to canonical model;
 - adversarial parser-isolation fixtures that attempt network access; reads outside the selected source/runtime/assets allowlist; writes outside the dedicated temporary directory; and CPU, memory, wall-time, output-file-size, and page-count overruns, with isolation-setup failure blocking before adapter execution;
-- mandatory independent dual-parser execution for a critical document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete diagnostic parser-validation report before blocking, promote no failed report and construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that byte-for-byte promotes its report, selects the configured primary parser artifact, and produces byte-identical canonical output on rebuild;
+- mandatory independent dual-parser execution for a `release_tier: critical` document, including injected parser failure and clause, table, and page-mapping disagreements that finalize and retain the complete diagnostic parser-validation report before blocking, promote no failed report and construct or cache no canonical artifact, and leave the active release unchanged, plus a passing below-threshold difference that byte-for-byte promotes its report, selects the configured primary parser artifact, and produces byte-identical canonical output on rebuild;
 - end-to-end build of a public sample document;
+- end-to-end Section 12.2 vocabulary fixtures for a normatively referenced standard, a mixed design guideline with a source-`required` provision, a superseded historical edition, a separate amendment, normative/informative appendices and nested notes, manufacturer instructions, multiple/unknown jurisdictions and disciplines, and parser ambiguity; every catalog, lineage, report, tool/resource, traversal, and conflict projection must preserve the same exact terms without inferring legal force;
+- end-to-end Evidence Lineage for one multi-channel direct result and one context-only result, including OCR and no-OCR documents, complete and page-only coordinates, an admitted below-threshold parser comparison, a chunk spanning several node/page mappings, several independent paths to one target, and an unresolved or absent target that emits a warning but never a navigable path;
+- deterministic traversal fixtures for scope plus multiple exceptions, definition dependency and governing scope, table row plus title/headers/units/clause, informative note plus affected parent, a required dependency chain to an empty document root, a definition governing an empty structural scope, a cyclic reference, ordinary versus required cross-reference, superseded seed, explicit version comparison, same clause number in two editions, overlapping closures from several seeds, an atomic target also present in a broader semantic chunk whose expansion selects only its scope-contained source, and each exact-at/one-over traversal bound; empty targets must appear once in `context_targets` with every path and exact safe metadata, and identical release/query/mode must produce byte-identical source/target order, classes, paths, completeness, and warnings;
+- end-to-end conflict fixed-point closure where only the lowest-ranked side of a confirmed three-position conflict is a direct hit: all positions and each position's required context must appear once with exact spans/lineage/reasons, filters must affect only seeds, warnings and conflict ordering must be byte-identical, no winner may appear without encoded precedence, and exact-at/one-over conflict/position/span/reason/byte bounds must return a complete success or one `context_limit_exceeded` error without a one-sided package;
+- parser comparison disagreements in numeric tables that block before canonicalization and never become competing source positions, plus an admitted below-threshold difference that remains parser uncertainty rather than a confirmed source conflict;
 - a deliberately invalid catalog that fails at step 13 and invokes or caches no embedding, lexical-index, or vector-index builder while leaving the active release unchanged;
-- an evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the deterministic `build_content_id` and raw-result hash or failure record before step 19 blocks, while any operational run ID remains external and the active release remains unchanged;
+- an evaluation metric failure and an evaluation-execution failure that each finalize a report bound to the deterministic `build_content_id` and raw-result hash or failure record before step 20 blocks, while any operational run ID remains external and the active release remains unchanged;
 - byte-stable `knowledge.sqlite` after the step 13 gate, with current-run results written only to the checksummed evaluation artifact and no later catalog mutation;
 - SQLite catalog creation in a fresh temporary workspace and database per test;
 - lexical and vector artifact loading;
+- startup loading and validation of `evidence-vocabulary.json` and `lineage.json`, including exact catalog/classification agreement and rejection of changed definitions, unknown core tokens, unsupported versions, behavior-bearing extensions, or legacy aliases, followed by strict Evidence Package serialization that cannot expose a source locator, parser temporary path, configuration body, credential, exception text, random run ID, or wall-clock timestamp;
 - deterministic chunk-vector row mapping across multiple documents independent of SQLite insertion order; known scores must resolve to the intended chunk, source, and evidence under filters, while missing, duplicate, extra, shuffled, wrong-scope, wrong-row-order-version, wrong-shape, wrong-dtype, truncated, or checksum-invalid matrices are rejected and chunk identity/order/text, model/configuration, or row-order-version changes invalidate the embedding cache;
 - rejection of a lazy model with a changed, missing, extra, or pickle-backed weight artifact before loader invocation; a bounded controlled admitted set must prove pending tool/resource calls race to their quarantine surfaces, a cancellation that already won keeps its non-response outcome, no work request is admitted and no success commits after the transition, workers are reaped, cooperative writers flush all committed frames, a blocked writer forces exit at the shutdown bound with redacted undelivered-frame accounting, and restart fails until rollback or repair;
 - CLI search;
@@ -1666,12 +2497,13 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - page-resource boundary tests covering exact-max and one-byte-over release admission; concurrent `source_size + 1 + response_size` reservations that cannot exceed the process byte budget; pathname replacement between availability check and open; pathname replacement after open; in-place truncate, append, and same-size mutation during read; handle identity/metadata changes; and proof that only the exact buffered bytes are hashed, encoded, and emitted or else a complete `-32603` error is returned;
 - indexed query plans for exact clause, jurisdiction, discipline, status, and document-type filters;
 - a target-edition catalogue change that invalidates cross-references and release assembly while an unrelated parse cache remains valid;
-- a standard document with an unresolved reference that ships only with an advisory and no target IDs, contrasted with a critical document whose same unresolved status blocks publication;
+- a `release_tier: standard` document with an unresolved reference that ships only with an advisory and no target IDs, contrasted with a `release_tier: critical` document whose same unresolved status blocks publication;
 - candidate-release smoke tests before the active-pointer switch;
 - crash injection before temporary-file flush, immediately before replacement, after replacement but before the parent-directory flush, and after that flush; recovery must yield the complete old or new `active.json` before the final flush, must yield the new record after it, and must never expose a missing or torn record. Concurrent readers prove the same old-or-new property, and rollback passes the identical suite;
 - injected build and validation failures proving the active release is unchanged;
-- build-ledger sealing at the step 20 cutoff and external operator-lifecycle-ledger chaining for candidate validation, publication, pointer-switch failure, and rollback without modifying sealed release bytes;
+- build-ledger sealing at the step 21 cutoff and external operator-lifecycle-ledger chaining for candidate validation, publication, pointer-switch failure, and rollback without modifying sealed release bytes;
 - byte-identical release artifacts, deterministic `build_content_id`, and identical `release_id` across separate operational runs with the same explicit reproducible build epoch; a changed admitted artifact, assembly input, display label, or epoch must change `release_id`, while random run IDs and wall-clock timestamps appear only in external ledger events;
+- lineage continuity when an identical source filename is replaced with different bytes, indexes are regenerated with changed or byte-identical inputs, and the active pointer rolls forward and back; every Evidence Package must use only the source, lineage, catalog, and retrieval artifacts from its single active release;
 - adversarial static-report rendering with HTML, SVG, URL, CSS, and script sentinels in every untrusted field, verifying inert display, the restrictive offline CSP, and zero external requests;
 - OS-read-only release operation and query logging that leaves every release byte unchanged;
 - log-sink tests injecting credential, absolute-path, query, evidence-text, and client-controlled JSON-RPC-ID sentinels through successes, failures, saturation, and blocked quarantine flushes, proving credentials, paths, and client IDs never appear in any sink; query/evidence text is absent by default, explicit opt-in affects only its documented fields, undelivered frames use only server-generated correlation IDs, and redaction occurs before every configured sink;
@@ -1682,7 +2514,9 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - parser snapshots for representative documents;
 - expected clause trees;
 - expected table structures;
-- citation and warning outputs;
+- citation, Evidence Lineage, uncertainty, and warning outputs, including `source_coordinate_incomplete`, `ocr_low_confidence`, and `parser_comparison_difference` propagation and deterministic top-level deduplication;
+- confirmed, explained, unresolved, three-position, encoded-precedence, and no-precedence conflict outputs; hard negatives cover exceptions, compatible modalities, equal convertible units, amendments, supersession, and disjoint applicability, while all runtime material sides and exact lineage must survive adverse retrieval ranks;
+- vocabulary/classification snapshots for every core document/node/status/normative/modality value and origin, including byte-identical inheritance and public serialization, `unclassified`/`unknown` warning preservation, note/appendix role separation, legacy-alias rejection, and no classification change under adverse retrieval ranks;
 - protocol error, tool execution error, empty-evidence success, and path-redaction outputs;
 
 ### 34.4 Packaging tests
@@ -1735,7 +2569,7 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 ### Phase 4: High-accuracy retrieval
 
 - add cross-encoder reranking;
-- add structural context expansion;
+- add deterministic Evidence Graph context traversal;
 - improve tables and cross-references;
 - add typed warnings and refusal support.
 
@@ -1758,6 +2592,7 @@ The first usable MVP must:
 - validate manifests and source hashes;
 - reject unsafe YAML tags, unapproved manifest changes, invalid catalog relationships, and path escapes;
 - preserve document, edition, clause, page, and source identity;
+- compile and validate the exact ClauseSift Engineering Evidence Vocabulary, classification provenance, and conservative unknown handling without legacy aliases or legal-force inference;
 - perform exact clause lookup;
 - perform lexical search with metadata filters;
 - return original evidence text and deterministic citations;
@@ -1819,6 +2654,7 @@ ClauseSift v0.1 is based on the following decisions:
 - use exact dense retrieval before approximate indexing;
 - use reranking for high-accuracy queries;
 - preserve parent scope, exceptions, notes, tables, and references;
+- use the versioned ClauseSift Engineering Evidence Vocabulary to keep document type, lifecycle status, authority, jurisdiction, discipline, normative status, source modality, node type, applicability, and relationships orthogonal;
 - generate deterministic citations and page mappings;
 - expose a shared runtime through Python, CLI, and MCP;
 - target MCP `2026-07-28` with tested dual-era compatibility for `2025-11-25` clients;
