@@ -4,346 +4,316 @@
 **Phase:** 2 — Exact Retrieval MVP  
 **Status:** Normative Phase 2 implementation-plan appendix  
 **Primary design authority:** `docs/design.md` Section 7.2  
-**Companion plan:** `docs/implementation/phase-2-exact-retrieval-mvp.md`
+**Companion:** `docs/implementation/phase-2-evidence-service.md`
 
 ## 1. Purpose and scope
 
-Phase 2 creates the first immutable ClauseSift releases, canonical catalog, source records, lexical retrieval artefact, and read-only runtime. Therefore every Phase 2 release must already contain the release-scoped deterministic **Evidence Lineage build artefact** required by `docs/design.md` Section 7.2.
+Phase 2 creates the first immutable ClauseSift release and now also implements the ordinary exact/lexical Evidence Package path. It therefore owns both:
 
-Phase 2 does not yet implement Phase 4's complete per-request Evidence Package assembly paths. This appendix separates the two concerns exactly as the design does:
+- immutable **source/build/release provenance** materialized in canonical `lineage.json`; and
+- request-scoped **retrieval/assembly provenance** added at runtime to each Evidence Package without mutating the release.
 
-- **builder responsibility in Phase 2:** materialize source provenance + build provenance + references to every retrieval artefact actually admitted by the Phase 2 release as canonical `lineage.json`;
-- **later Phase 3/4 responsibility:** extend the immutable release with newly admitted semantic/vector/model artefacts when those phases rebuild the release, and add query-specific retrieval/assembly provenance at runtime without mutating `lineage.json`.
+These dimensions are separate and non-interchangeable.
 
-`lineage.json` is not deferred merely because the final Evidence Package is deferred.
+`lineage.json` never contains query-specific ranks, selected seeds, request IDs, or context paths. The runtime never fabricates source/build provenance outside the verified release.
 
-## 2. Materialization point in the Phase 2 build
+Phase 3/4 later add their own release artifacts/configurations and request-stage metadata only through the existing versioned contracts.
 
-The builder materializes `lineage.json` only after all Phase 2 retrieval artefacts are finalized and before deriving `build_content_id`.
+## 2. Build materialization point
 
-For the Phase 2 milestone, the ordering is:
+Materialize `lineage.json` after every Phase 2 query-independent artifact that contributes to source/build/release provenance is finalized and before `build_content_id` is derived.
 
-1. validate approved manifests and exact source bytes;
-2. complete parser-neutral outputs and passing parser-validation report;
-3. build canonical nodes and classification-provenance records;
-4. build authoritative page-provenance mappings;
-5. build chunks/source rows and validated SQLite catalog;
-6. build the selected, frozen lexical index;
-7. finalize every other Phase 2 release artefact that contributes to source/build/retrieval provenance;
-8. materialize and validate canonical `lineage.json`;
-9. hash `lineage.json`;
-10. include that hash among deterministic `build_content_id` inputs;
-11. run the Phase 2 evaluation/release gates;
-12. assemble the immutable release manifest containing the lineage path/hash/schema metadata;
-13. validate and activate only after all later Phase 2 release gates pass.
+Current Phase 2 ordering is:
 
-No `build_content_id` or release identity is derived from a release that omits required lineage.
+1. validate approved manifests/source bytes;
+2. complete parser-neutral outputs and passing comparison/validation;
+3. build canonical nodes/classifications;
+4. build page provenance;
+5. build chunks/sources/catalog;
+6. compile/validate relationship/context/conflict artifacts;
+7. build selected lexical index;
+8. finalize all other Phase 2 release artifacts/configuration references;
+9. materialize and independently validate canonical `lineage.json`;
+10. hash it and include the hash in build-content identity inputs;
+11. run complete Phase 2 gates;
+12. assemble/checksum/reopen the immutable candidate release;
+13. activate only after every gate succeeds.
+
+No release/build identity is accepted when mandatory lineage is absent.
 
 ## 3. Canonical serialization and identity
 
-`lineage.json` uses a versioned strict schema and RFC 8785 canonical JSON serialization.
+`lineage.json` uses a versioned strict schema and RFC 8785 canonical JSON.
 
-The artefact:
+It contains no:
 
-- contains no self-hash;
-- contains no `build_content_id`;
-- contains no `release_id`;
-- contains no random operational run ID;
-- contains no wall-clock timestamp;
-- contains no source locator/path;
-- contains no source text;
-- contains no credential;
-- contains no raw exception string or parser temporary path.
+- self-hash;
+- `build_content_id` or `release_id` that would create recursive identity;
+- random run ID;
+- wall-clock timestamp;
+- source locator/path;
+- source text;
+- credential;
+- raw exception or temporary path;
+- runtime query/request data.
 
-The release manifest later binds:
+The later release manifest binds lineage relative path, schema, byte size, SHA-256, `build_content_id`, and `release_id` under the existing non-recursive dependency graph.
 
-- lineage relative path;
-- lineage schema version;
-- lineage byte size;
-- lineage SHA-256;
-- `build_content_id`;
-- `release_id`.
+## 4. Document and source coverage
 
-This avoids recursive identity while making lineage a mandatory checksummed release artefact.
+`lineage.json` contains exactly one document record for every admitted manifested/catalog document and exactly one source-lineage record for every catalog `sources` row beneath its owning document.
 
-## 4. Exactly one document record per manifested document
+Independent release validation requires exact set equality and rejects:
 
-`lineage.json` contains exactly one top-level lineage record for every manifested document admitted to the candidate catalog.
+- missing/extra/duplicate document;
+- missing/extra/duplicate source;
+- wrong document/source/chunk/node ownership;
+- reference to a non-existent catalog identity;
+- release-mismatched lineage.
 
-Release validation requires exact set equality between:
+Every runtime source-backed item can therefore join one exact `source_id` to one verified source/build lineage record.
 
-- manifested/catalog document IDs; and
-- lineage document IDs.
+## 5. Source provenance
 
-Missing, duplicate, extra, or wrong-release document records are blocking `release_validation_failed` conditions.
+For every source-backed record bind enough immutable data to prove where quoted bytes came from without replacing source authority.
 
-Each document record binds at minimum the safe deterministic identities needed by the design, including:
+At minimum retain/reconstruct:
 
-- `document_id`;
-- approved `manifest_content_hash`;
-- exact source-file SHA-256 and byte size;
-- exact evidence-vocabulary version/hash;
-- ordered selected parser route provenance;
-- passing parser-validation report hash;
-- canonical-model/classification artefact identities;
-- page-provenance artefact identity;
-- catalog identity relevant to the document;
-- retrieval artefact references admitted for this release.
-
-Human-readable source paths are not lineage fields.
-
-## 5. Exactly one source-lineage record per catalog source
-
-Beneath each document, `lineage.json` contains exactly one source-lineage record for every catalog `sources` row owned by that document.
-
-Release validation requires one-to-one equality between catalog `source_id` values and lineage source records. It rejects:
-
-- missing source lineage;
-- extra lineage source;
-- duplicate source record;
-- source assigned to the wrong document;
-- source/chunk ownership mismatch;
-- lineage referring to a non-existent chunk/node;
-- lineage from another release/catalog identity.
-
-The runtime can therefore join any Phase 2 direct retrieval `source_id` to exactly one verified release-scoped source/build lineage record.
-
-## 6. Source provenance fields
-
-For every source-backed record, the lineage artefact binds source provenance sufficient to prove where the quoted/retrieved bytes came from without replacing the source as authority.
-
-Record at minimum:
-
-- stable `document_id`;
-- stable `source_id`;
-- stable `chunk_id`;
+- stable document/source/chunk IDs;
 - approved manifest-content hash;
-- exact source-file hash and size;
-- ordered contributing node IDs;
-- exact ordered UTF-8 chunk membership spans;
-- the authoritative page-span intersections derived from `node_page_spans`;
-- validated page numbers;
-- validated boxes when available;
-- coordinate-status derivation inputs;
-- source/chunk ownership identities.
+- exact source hash and byte size;
+- ordered contributing canonical node IDs;
+- exact contributed node byte spans;
+- exact intersections with validated node page spans;
+- page numbers and validated boxes where available;
+- coordinate-status derivation;
+- source/chunk/document ownership.
 
-The ordered source spans are recomputed as the exact intersections of `chunk_nodes` membership with `node_page_spans`; lineage does not trust a second independently writable page/span copy.
+Source spans are recomputed from authoritative chunk membership + page mappings; they are not a second freely writable copy.
 
-## 7. Build provenance fields
+## 6. Build provenance
 
-Each source lineage record binds the exact build derivation that produced its canonical representation.
+Bind the exact deterministic build derivation required by Section 7.2, including as applicable:
 
-Record or reference at minimum:
+- lineage schema;
+- ordered parser roles and parser ID/version/configuration;
+- parser-neutral artifact hashes;
+- passing parser-validation/comparison report;
+- OCR admitted asset/configuration identity;
+- evidence vocabulary version/hash;
+- complete per-node classification records, values, origins, support, rule/review identity, provenance hashes;
+- canonical model transformation;
+- page-provenance transformation;
+- chunk projection;
+- relationship resolution;
+- conflict analysis;
+- catalog artifact identity;
+- diagnostic OCR/parser comparison state;
+- every release artifact/configuration reference required by the current design.
 
-- lineage schema version;
-- ordered parser roles;
-- parser identity/version/configuration hash for every selected role;
-- parser-neutral content hashes;
-- passing parser-validation-report hash;
-- OCR configuration/declared local-asset digests where applicable;
-- exact evidence-vocabulary version/hash;
-- the three classification records for every contributing canonical node;
-- each classification value, origin, supporting provenance hash, and applicable deterministic rule/review identity;
-- canonical-model artefact hash/version;
-- normalization/classification transformation versions;
-- page-provenance artefact hash/version;
-- chunking artefact/version/configuration hash;
-- stable node/chunk/source identities;
-- diagnostic build uncertainty such as admitted OCR/comparison state;
-- candidate catalog hash or deterministic catalog identity.
+A comparator remains validation provenance; it never silently merges source facts.
 
-A comparator is validation provenance only. It never becomes a silent field-level source merge.
+## 7. Phase 2 retrieval/context/conflict artifact provenance
 
-## 8. Phase 2 retrieval-artefact provenance
+The immutable release binds query-independent identities for every behavior-bearing Phase 2 artifact/configuration it admits, including:
 
-Phase 2 has lexical retrieval but intentionally no dense embedding/vector/fusion/reranker artefacts.
-
-The lineage schema represents **the complete set of retrieval artefacts actually admitted by the current release**, not fictional placeholders.
-
-For Phase 2 this set contains the checksummed lexical retrieval artefact and its exact identity, including:
-
-- lexical engine/version;
-- tokenizer/version;
-- lexical configuration hash;
-- lexical schema/index version;
-- ordered search-text/metadata input hash set or upstream chunk artefact hash;
-- lexical artefact SHA-256/byte size;
-- selected Phase 2 capability-set version.
-
-The release capability metadata and lineage schema make absence of Phase 3 features explicit. Phase 2 must not fabricate zero hashes, empty model names, or dummy vector/model artefacts merely to satisfy a later feature set.
-
-When Phase 3 adds embeddings/vector/fusion, that change produces new retrieval artefacts and a new `lineage.json`, `build_content_id`, and release identity. It does not mutate an activated Phase 2 release in place.
-
-## 9. Rule/configuration bindings required before later traversal
-
-The design binds release identity to behavior-bearing rule/configuration versions. Phase 2 records the exact versions/hashes already admitted by its canonical graph/catalog and release validation, even when the corresponding Phase 4 runtime traversal surface is not advertised yet.
-
-This includes applicable schema/configuration identities for:
-
-- edge identity;
-- relationship occurrence identity;
+- lexical engine/tokenizer/index configuration and artifact hash set;
+- graph edge/occurrence identity schema versions;
+- relationship resolver/configuration and artifacts;
+- required-context rule-set/configuration and applicable ordering/bounds;
+- material-conflict detector/rule/decision/cover artifact/configuration identities;
 - evidence vocabulary;
-- conflict/cross-reference compilation artefacts admitted to the Phase 2 catalog;
-- context/conflict rule-set/configuration values that are release inputs under the design, where the Phase 2 builder already compiles/validates them for later use.
+- central Evidence Package schema/serializer identity where release-bound.
 
-Recording a configuration identity is not the same as implementing Phase 4 traversal. Phase 2 does not emit runtime context paths or claim that required closure is available.
+Phase 2 has no dense/vector/RRF/reranker artifact and must not fabricate placeholders for them.
 
-## 10. Phase 2 runtime join
+When later phases add new release artifacts, they produce a new immutable release/lineage/build identity rather than mutating the activated Phase 2 release.
 
-At startup, after verifying the release manifest and before accepting a query, the runtime validates the complete `lineage.json` artefact and joins it to the checksum-verified catalog.
+## 8. Query-independent `lineage.json` boundary
 
-It verifies at minimum:
+The sealed release file must not contain request-specific:
 
-- supported lineage schema version;
-- manifest-declared lineage path/hash/size;
-- exact one-to-one document coverage;
-- exact one-to-one source coverage;
-- source→chunk→document ownership;
-- referenced canonical/page/parser/vocabulary/classification artefact hashes;
-- exact per-node classification agreement with the catalog;
-- retrieval-artefact references present in the immutable release;
-- no missing/extra/unknown fields under the strict schema;
+- query text;
+- lexical candidate rank/score for one request;
+- selected seed list;
+- context paths selected by one request;
+- conflict inclusion reasons triggered by one request;
+- request/cancellation/deadline state;
+- runtime resolved mode for one request.
+
+Those values belong only to request-scoped assembly lineage in the returned Evidence Package.
+
+## 9. Runtime startup validation
+
+Before accepting evidence work, runtime validates the manifest + complete lineage/catalog graph.
+
+At minimum verify:
+
+- supported lineage schema;
+- exact manifest-declared lineage path/hash/size;
+- one-to-one document/source coverage;
+- source -> chunk -> document ownership;
+- referenced parser/canonical/page/vocabulary/classification artifacts;
+- per-node classification equality with the catalog;
+- lexical/context/conflict/retrieval artifact references;
+- supported rule/configuration versions;
+- no missing/extra/unknown fields;
 - no release-mismatched identity.
 
-Any failure is `release_integrity_failed` at startup. The server must not continue with a partial lineage file, rebuild lineage in memory, or silently fall back to path-based provenance.
+Failure is `release_integrity_failed`; runtime does not reconstruct lineage opportunistically or fall back to filesystem provenance.
 
-## 11. Direct Phase 2 retrieval provenance
+## 10. Request-scoped retrieval provenance
 
-Phase 2 direct exact/lexical retrieval services can return or internally expose their source records for CLI/evaluation without claiming the final Phase 4 Evidence Package.
+For each direct exact/lexical retrieval seed, runtime assembly lineage uses only the existing Section 21 closed fields.
 
-When provenance is requested by a Phase 2 diagnostic/evaluation surface, it must be derived by joining the selected `source_id` to the verified immutable lineage record plus typed per-request direct-selection metadata.
+As applicable record:
 
-For a Phase 2 direct result:
+- selection role `retrieval_seed`;
+- exact originating seed source IDs;
+- `assembly.retrievals[]` records using the closed exact/lexical channels, channel/configuration/artifact-set identity, candidate rank, and finite/null score as allowed;
+- no dense/fusion/rerank record when those stages did not run.
 
-- source/build provenance comes from `lineage.json`;
-- lexical channel/rank/score may be attached as non-authoritative per-request selection metadata;
-- a direct seed may identify itself as the originating source;
-- context-path arrays remain empty/not-advertised because Phase 4 traversal is not implemented;
-- no model score, generated summary, or query classification becomes source provenance.
+A retrieval rank/score is non-authoritative selection metadata; it never becomes source provenance or applicability/conflict authority.
 
-The final Section 21 lineage object and complete retrieval/assembly path contract is enabled only when the Phase 4 Evidence Package is implemented. Phase 2 nevertheless preserves all immutable source/build facts required to construct it later.
+## 11. Request-scoped context lineage
 
-## 12. Build-content and cache invalidation
+For sources/targets attached by required traversal, assembly lineage retains:
 
-The SHA-256 of canonical `lineage.json` is a deterministic input to Phase 2 `build_content_id` and downstream release assembly.
+- selection roles (`expanded_context` as applicable);
+- seed source IDs;
+- context completeness;
+- every accepted context path;
+- each path step's stable edge identity, canonical relation direction/endpoints, validated origin groups/occurrences, and rule ID through the existing closed schema.
 
-A change to any lineage-bearing input invalidates the lineage artefact and affected release identity, including:
+Metadata-only `context_targets` carry their exact accepted paths but no fabricated source/build lineage.
 
-- source bytes/hash/size;
+The same source reached through several independent accepted paths retains every in-bound path up to the declared bound.
+
+## 12. Request-scoped conflict lineage
+
+Evidence attached due to material-conflict fixed-point closure carries `conflict_context` as applicable and the exact closed conflict inclusion reason(s) defined by Section 21.
+
+An independently retrieved source may carry both direct and conflict roles.
+
+The response-level `conflicts` array projects complete material records separately; conflict reasons never rewrite source/build lineage.
+
+## 13. Current Phase 2 public Evidence Lineage
+
+Phase 2 ordinary `search_evidence`, `get_clause`, and `get_context` already return the complete Section 21 lineage shape required for the behaviors they execute.
+
+The public item lineage has three dimensions:
+
+1. source provenance from the immutable release;
+2. build provenance from immutable release lineage/catalog artifacts;
+3. request-scoped assembly provenance generated by the shared evidence service.
+
+There is no longer a Phase 2 rule that leaves context paths empty merely because traversal was deferred: current Phase 2 implements required traversal and must report the real accepted paths.
+
+## 14. Central serializer validation
+
+Before returning a source-backed evidence item, the serializer independently verifies that:
+
+- enclosing `document_id`/`source_id` select the same lineage record;
+- source spans equal canonical chunk/page intersections;
+- public page/box projections equal lineage source spans;
+- canonical node IDs/classification records equal the verified catalog;
+- build transformation artifact identities equal the verified `lineage.json` records;
+- context/conflict rule identities match the active manifest/release;
+- retrieval records name admitted artifact sets;
+- context paths use validated graph edges/occurrences;
+- conflict reasons match returned conflict positions;
+- no closed-object extra property is emitted.
+
+Mismatch fails closed.
+
+## 15. Build-content/cache invalidation
+
+Canonical `lineage.json` SHA-256 is a deterministic input to build/release identity.
+
+Invalidate it and affected downstream release identity after any lineage-bearing change, including:
+
+- source bytes/size/hash;
 - approved manifest content;
-- parser route/version/configuration;
-- passing parser-validation report;
-- vocabulary/classification value or provenance;
-- canonical transformation;
-- page mapping;
-- chunk/source identity or membership;
+- parser route/version/configuration or passing validation report;
+- vocabulary/classification value/provenance;
+- canonical/page/chunk transformations;
+- relationship/context/conflict artifacts/configuration;
+- lexical artifact/configuration;
 - catalog identity;
-- lexical retrieval artefact/version/configuration;
-- lineage schema;
-- admitted behavior-bearing relationship/conflict/context configuration.
+- lineage schema.
 
-A different runtime query does not alter `lineage.json`.
+A different runtime query changes only request assembly lineage, not immutable `lineage.json`.
 
-## 13. Rollback continuity
+## 16. Rollback continuity
 
-An immutable release and its `lineage.json` are activated and rolled back together.
+Activation/rollback always switch catalog + all retrieval/context/conflict artifacts + `lineage.json` + manifest/configuration as one immutable release.
 
-Rollback to an older release restores that release's:
+The runtime never joins an active catalog to lineage from another release even when document/source IDs look similar.
 
-- source hashes;
-- manifest hashes;
-- parser/build provenance;
-- canonical/catalog identities;
-- lexical artefact references;
-- lineage hash.
+## 17. Static review report
 
-The runtime never joins the active catalog to lineage from another release, even when filenames or document IDs look similar.
-
-## 14. Static review report
-
-The Phase 2 static review report includes a lineage section that allows an operator to audit, without exposing sensitive paths/text:
+Report safe audit information including:
 
 - document/source lineage counts;
-- schema/version/hash;
-- catalog-vs-lineage coverage check;
-- parser role/hash summary;
+- lineage schema/hash;
+- catalog coverage equality;
+- parser/build artifact summary;
 - vocabulary/classification-provenance consistency;
-- lexical retrieval artefact binding;
-- page-coordinate completeness summary;
-- every blocking lineage validation failure;
-- any advisory OCR/parser comparison state.
+- lexical artifact binding;
+- graph/context/conflict artifact/configuration binding;
+- coordinate completeness;
+- blocking lineage errors;
+- admitted OCR/parser comparison diagnostics.
 
-The report is diagnostic; `lineage.json` plus source/manifest/catalog remain the deterministic release inputs.
+The report is diagnostic; release lineage/source/catalog remain deterministic authority.
 
-## 15. Tests
+## 18. Tests
 
-### 15.1 Deterministic materialization
+### Determinism
 
-Test:
+- byte-identical rebuild -> byte-identical `lineage.json`;
+- source/manifest/parser/classification/page/chunk/relationship/context/conflict/lexical behavior change -> correct invalidation;
+- timestamps/run IDs do not change bytes;
+- runtime query does not mutate release lineage.
 
-- byte-identical rebuild produces byte-identical `lineage.json`;
-- same filename with changed source bytes changes lineage/release identity;
-- lexical index regeneration with changed inputs changes lineage;
-- byte-identical lexical artefact under unchanged declared inputs preserves lineage;
-- operational run IDs/timestamps never change lineage bytes.
+### Coverage/integrity
 
-### 15.2 Coverage/integrity failures
+Reject missing/extra/duplicate/wrong-owner document/source records, nonexistent node/chunk IDs, mismatched source/manifest/parser/classification/page/retrieval/context/conflict artifacts, unsupported lineage schema, or lineage from another release.
 
-Reject:
+### Runtime assembly
 
-- missing document record;
-- extra document record;
-- missing/extra/duplicate source record;
-- wrong source ownership;
-- nonexistent node/chunk;
-- wrong source/manifest hash;
-- wrong parser/report hash;
-- wrong classification value/origin/provenance;
-- wrong page mapping/span;
-- missing or wrong lexical artefact reference;
-- unknown lineage schema/version/field;
-- lineage from another release.
+Fixtures cover:
 
-### 15.3 Startup and rollback
+- exact direct seed retrieval record;
+- lexical direct seed rank/score;
+- required applicability/exception/table context path;
+- reconvergent independent paths;
+- metadata-only context target;
+- conflict-context source and inclusion reason;
+- one source with several roles;
+- no dense/fusion/rerank record in Phase 2-only mode;
+- serializer rejection of an invalid edge/occurrence/conflict reason.
 
-Prove:
+### Startup/rollback
 
-- runtime validates lineage before accepting Phase 2 queries/MCP work;
-- invalid lineage fails startup with `release_integrity_failed`;
+- lineage validates before evidence work;
+- invalid lineage blocks startup;
 - no partial/fallback provenance is served;
 - activation validates lineage before pointer switch;
-- rollback restores catalog + lineage from the same old release;
-- active release bytes remain read-only during runtime provenance assembly.
+- rollback restores matching catalog/artifacts/lineage as one release.
 
-### 15.4 Source-span reconstruction
-
-Fixtures include:
-
-- one node/one page;
-- multiple nodes in one chunk;
-- chunk spanning several pages;
-- complete page-and-box mappings;
-- page-only mappings with missing optional boxes;
-- OCR-admitted source;
-- admitted below-threshold parser comparison difference.
-
-The derived lineage spans must exactly equal the authoritative chunk-membership/page-span intersections.
-
-## 16. Acceptance criteria
+## 19. Acceptance criteria
 
 Phase 2 is not complete unless:
 
 1. every candidate release contains canonical checksummed `lineage.json`;
-2. lineage is materialized after Phase 2 retrieval artefacts and before `build_content_id`;
-3. every manifested document appears exactly once;
-4. every catalog source appears exactly once beneath its owning document;
-5. every source record carries source/build provenance sufficient to reproduce its Phase 2 canonical derivation;
-6. the Phase 2 lexical retrieval artefact is explicitly bound and absent Phase 3 artefacts are not fabricated;
-7. the release manifest records lineage schema/path/hash/size;
-8. lineage hash participates in build/release identity;
-9. release validation and runtime startup independently verify lineage/catalog/classification/retrieval-artifact consistency;
-10. invalid/missing lineage blocks activation/startup;
-11. rollback restores lineage and catalog as one immutable release;
-12. Phase 2 direct-result provenance is joined from verified lineage without claiming Phase 4 runtime assembly semantics.
-
-This requirement remains strictly Phase 2 because Phase 2 creates and serves the immutable release whose provenance later phases build upon.
+2. every manifested document/catalog source has exactly one matching lineage record;
+3. source/build provenance fully reproduces the Phase 2 canonical derivation;
+4. lexical/relationship/context/conflict artifacts/configuration are explicitly bound without fake later-phase placeholders;
+5. lineage hash participates in release identity;
+6. independent release/startup validation proves catalog/artifact/lineage consistency;
+7. ordinary Phase 2 Evidence Packages add real request-scoped direct/context/conflict assembly lineage through the current closed schema;
+8. immutable `lineage.json` remains query-independent;
+9. invalid/missing provenance blocks startup/activation/serialization;
+10. rollback restores lineage and all matching release artifacts atomically;
+11. no Phase 3/4 provenance is fabricated before the corresponding stage actually exists.
