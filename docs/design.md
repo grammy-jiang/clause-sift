@@ -1174,13 +1174,13 @@ flowchart TB
 
     subgraph SEMANTIC[Semantic relations]
         direction LR
-        CITER[Source-bearing node] -->|references| CITED[Addressable node or document root]
-        DEPENDENT[Requirement, clause, subclause, paragraph, table row, or exception] -->|depends_on| DEPENDENCY[Interpretation dependency]
-        EXCEPTION[Exception] -->|exception_to| AFFECTED[Affected source-bearing node]
-        DEFINITION[Definition] -->|defines| SCOPE[Governing scope]
+        CITER[Any source-bearing node] -->|references| CITED[Addressable node or document root]
+        DEPENDENT[Requirement, clause, subclause, paragraph, table row, or exception] -->|depends_on| DEPENDENCY[Requirement, clause, subclause, definition, table, or document]
+        EXCEPTION[Exception] -->|exception_to| AFFECTED[Requirement, clause, subclause, paragraph, or table row]
+        DEFINITION[Definition] -->|defines| SCOPE[Document, part, chapter, section, clause, subclause, or appendix]
         NEWER[Newer document root] -->|supersedes| OLDER[Older document root]
-        AMENDING[Amending document root] -->|amends| TARGET[Changed document or node]
-        GOVERNED[Governed source node] -->|applies_subject_to| APPLICABILITY[Applicability target]
+        AMENDING[Amending document root] -->|amends| TARGET[Document root or addressable node]
+        GOVERNED[Requirement, clause, subclause, paragraph, table row, or exception] -->|applies_subject_to| APPLICABILITY[Document, part, chapter, section, clause, subclause, paragraph, requirement, exception, table, table row, or appendix]
     end
 ```
 
