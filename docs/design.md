@@ -1,10 +1,12 @@
 # ClauseSift Design Document
 
-**Document version:** 0.1  
-**Status:** Initial design baseline  
-**Project:** ClauseSift  
-**Repository:** `grammy-jiang/clause-sift`  
-**Primary implementation language:** Python  
+- **Document version:** 0.1
+- **Status:** Initial design baseline
+- **Project:** ClauseSift
+- **Repository:** `grammy-jiang/clause-sift`
+- **Primary implementation language:** Python
+- **Product-intent source:** [ClauseSift Design Brief](design-brief.md)
+- **Design rulebook:** [ClauseSift Design Principles](design-principles.md)
 
 ## 1. Executive summary
 
