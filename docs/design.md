@@ -278,15 +278,15 @@ Sections 12–14 define graph nodes and relational persistence, Sections 19–20
 
 **Evidence Lineage** is the mandatory, deterministic derivation record for every source-backed Evidence Package `evidence` item. It answers three separate questions without changing source authority: where the quoted evidence came from, which build transformations produced its canonical representation, and why the runtime selected or attached it. A metadata-only `context_targets` record is not an evidence item and claims no quoted source span: Section 21 instead binds its exact catalog/manifest projections and accepted assembly paths to the active release. The complete source-backed lineage is:
 
-```text
-approved manifest + exact source bytes
-    -> parser-neutral output(s) + parser-validation report
-    -> canonical node(s) + page-provenance mappings
-    -> chunk + source record
-    -> checksummed lexical/vector/model artifacts
-    -> retrieval candidate + fusion/rerank decision
-    -> zero or more typed context edges
-    -> Evidence Package item
+```mermaid
+flowchart TD
+    INPUTS[Approved manifest and exact source bytes] --> PARSE[Parser-neutral outputs and parser-validation report]
+    PARSE --> CANONICAL[Canonical nodes and page-provenance mappings]
+    CANONICAL --> RECORD[Chunk and source record]
+    RECORD --> ARTIFACTS[Checksummed lexical, vector, and model artifacts]
+    ARTIFACTS --> RETRIEVAL[Retrieval candidate and fusion/rerank decision]
+    RETRIEVAL --> CONTEXT[Zero or more typed context edges]
+    CONTEXT --> PACKAGE[Evidence Package item]
 ```
 
 The contract has three non-interchangeable dimensions:
@@ -350,48 +350,42 @@ This prevents a simple MCP runtime from inheriting the memory footprint and inst
 
 ## 9. Proposed repository layout
 
-```text
-clause-sift/
-├── docs/
-│   ├── design.md
-│   ├── canonical-model.md
-│   ├── retrieval.md
-│   ├── mcp-api.md
-│   └── evaluation.md
-├── src/
-│   └── clausesift/
-│       ├── __init__.py
-│       ├── cli.py
-│       ├── config/
-│       ├── model/
-│       ├── builder/
-│       │   ├── parsers/
-│       │   ├── normalisation/
-│       │   ├── chunking/
-│       │   ├── references/
-│       │   ├── lexical/
-│       │   ├── embeddings/
-│       │   ├── vector/
-│       │   ├── reports/
-│       │   └── release/
-│       ├── runtime/
-│       │   ├── catalog/
-│       │   ├── query/
-│       │   ├── retrieval/
-│       │   ├── reranking/
-│       │   ├── context/
-│       │   └── evidence/
-│       ├── mcp/
-│       └── evaluation/
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── regression/
-├── examples/
-├── pyproject.toml
-├── README.md
-├── LICENSE
-└── CHANGELOG.md
+```mermaid
+flowchart TD
+    ROOT[clause-sift/]
+
+    subgraph DOC_GROUP[" "]
+        direction TB
+        DOCS[docs/] --> DOC_FILES["design.md<br/>canonical-model.md<br/>retrieval.md<br/>mcp-api.md<br/>evaluation.md"]
+    end
+
+    subgraph SRC_GROUP[" "]
+        direction TB
+        SRC[src/] --> PACKAGE[clausesift/]
+        PACKAGE --> PACKAGE_CORE["__init__.py<br/>cli.py<br/>config/<br/>model/"]
+        PACKAGE --> BUILDER[builder/]
+        BUILDER --> BUILDER_MODULES["parsers/<br/>normalisation/<br/>chunking/<br/>references/<br/>lexical/<br/>embeddings/<br/>vector/<br/>reports/<br/>release/"]
+        PACKAGE --> RUNTIME[runtime/]
+        RUNTIME --> RUNTIME_MODULES["catalog/<br/>query/<br/>retrieval/<br/>reranking/<br/>context/<br/>evidence/"]
+        PACKAGE --> MCP[mcp/]
+        PACKAGE --> EVALUATION[evaluation/]
+    end
+
+    subgraph TEST_GROUP[" "]
+        direction TB
+        TESTS[tests/] --> TEST_MODULES["unit/<br/>integration/<br/>regression/"]
+    end
+
+    TOP_LEVEL["examples/<br/>pyproject.toml<br/>README.md<br/>LICENSE<br/>CHANGELOG.md"]
+
+    ROOT --> DOCS
+    ROOT --> SRC
+    ROOT --> TESTS
+    ROOT --> TOP_LEVEL
+
+    style DOC_GROUP fill:none,stroke:none
+    style SRC_GROUP fill:none,stroke:none
+    style TEST_GROUP fill:none,stroke:none
 ```
 
 The first implementation may use fewer modules, but public boundaries between builder, runtime, evidence model, and MCP should be preserved.
@@ -406,15 +400,24 @@ Source documents are stored outside the Python package and are never included in
 
 A typical user workspace may contain:
 
-```text
-workspace/
-├── corpus/
-│   ├── inbox/
-│   ├── originals/
-│   └── manifests/
-├── cache/
-├── releases/
-└── current
+```mermaid
+flowchart TD
+    WORKSPACE[workspace/]
+
+    subgraph CORPUS_GROUP[" "]
+        direction TB
+        CORPUS[corpus/]
+        CORPUS --> INBOX[inbox/]
+        CORPUS --> ORIGINALS[originals/]
+        CORPUS --> MANIFESTS[manifests/]
+    end
+
+    WORKSPACE --> CORPUS
+    WORKSPACE --> CACHE[cache/]
+    WORKSPACE --> RELEASES[releases/]
+    WORKSPACE --> CURRENT[current]
+
+    style CORPUS_GROUP fill:none,stroke:none
 ```
 
 ### 10.2 Copyright boundary
@@ -929,10 +932,11 @@ Deterministic analysis should detect:
 
 For explicit document, clause, model, or numeric queries:
 
-```text
-metadata filtering
-+ exact identifier lookup
-+ lexical retrieval
+```mermaid
+flowchart LR
+    FILTER[Metadata filtering] --> RESULTS[Exact-mode candidates]
+    IDENTIFIER[Exact identifier lookup] --> RESULTS
+    LEXICAL[Lexical retrieval] --> RESULTS
 ```
 
 No embedding or reranker is required unless exact retrieval is ambiguous.
@@ -941,23 +945,23 @@ No embedding or reranker is required unless exact retrieval is ambiguous.
 
 For natural-language questions:
 
-```text
-lexical retrieval
-+ dense retrieval
-+ rank fusion
+```mermaid
+flowchart LR
+    LEXICAL[Lexical retrieval] --> FUSION[Rank fusion]
+    DENSE[Dense retrieval] --> FUSION
 ```
 
 #### High-accuracy mode
 
 For complex, cross-document, or applicability-sensitive questions:
 
-```text
-exact lookup
-+ lexical retrieval
-+ dense retrieval
-+ fusion
-+ cross-encoder reranking
-+ context expansion
+```mermaid
+flowchart LR
+    EXACT[Exact lookup] --> FUSION[Fusion]
+    LEXICAL[Lexical retrieval] --> FUSION
+    DENSE[Dense retrieval] --> FUSION
+    FUSION --> RERANK[Cross-encoder reranking]
+    RERANK --> CONTEXT[Context expansion]
 ```
 
 The public mode enum is `auto`, `exact`, `hybrid`, and `high_accuracy`. The runtime may select a mode automatically, but the API must allow an explicit mode override. `auto` selects only among capabilities present in both the installed runtime and the active release. If dense retrieval or reranking is unavailable, `auto` returns the best available result with a typed `retrieval_capability_unavailable` warning; an explicit unavailable mode fails with `feature_unavailable` rather than silently degrading.
@@ -992,16 +996,13 @@ flowchart TD
 
 A starting high-accuracy pipeline is:
 
-```text
-exact identifier matches
-lexical top 30-50
-dense top 30-50
-        ↓
-deduplication and reciprocal-rank fusion
-        ↓
-cross-encoder reranking of top 20-30
-        ↓
-final evidence candidates: top 8-12
+```mermaid
+flowchart TD
+    EXACT[Exact identifier matches] --> FUSION[Deduplication and reciprocal-rank fusion]
+    LEXICAL[Lexical top 30-50] --> FUSION
+    DENSE[Dense top 30-50] --> FUSION
+    FUSION --> RERANK[Cross-encoder reranking of top 20-30]
+    RERANK --> FINAL[Final evidence candidates: top 8-12]
 ```
 
 These numbers are initial parameters. They must be adjusted through Recall@K and end-to-end evaluation rather than latency preference alone.
@@ -1027,15 +1028,15 @@ After retrieval, ClauseSift should inspect document structure and attach require
 
 Context expansion is structure-driven rather than a fixed previous/next chunk window. It is one deterministic traversal over the release-validated Evidence Graph, not arbitrary neighborhood expansion or LLM reasoning:
 
-```text
-ranked source/chunk candidates
-    -> every ordered canonical member node becomes a seed
-    -> apply versioned node/relation traversal rules
-    -> close required context, then consider optional context
-    -> materialize target nodes as source-backed evidence
-    -> deduplicate and order the bounded evidence subgraph
-    -> attach every accepted path, uncertainty, and warning
-    -> serialize one Evidence Package
+```mermaid
+flowchart TD
+    CANDIDATES[Ranked source and chunk candidates] --> SEEDS[Every ordered canonical member node becomes a seed]
+    SEEDS --> TRAVERSE[Apply versioned node and relation traversal rules]
+    TRAVERSE --> CONTEXT[Close required context, then consider optional context]
+    CONTEXT --> MATERIALIZE[Materialize target nodes as source-backed evidence]
+    MATERIALIZE --> ORDER[Deduplicate and order the bounded evidence subgraph]
+    ORDER --> ANNOTATE[Attach every accepted path, uncertainty, and warning]
+    ANNOTATE --> PACKAGE[Serialize one Evidence Package]
 ```
 
 ### 19.1 Context classes and profiles
@@ -1207,11 +1208,12 @@ The initial semantic relations are deliberately limited to the existing vocabula
 
 For example, direction never changes with the query:
 
-```text
-exception node --exception_to--> affected requirement
-governed requirement --applies_subject_to--> applicability condition
-citing clause --references--> cited clause
-new document root --supersedes--> old document root
+```mermaid
+flowchart LR
+    EXCEPTION[Exception node] -->|exception_to| REQUIREMENT[Affected requirement]
+    GOVERNED[Governed requirement] -->|applies_subject_to| APPLICABILITY[Explicit applicability target]
+    CITING[Citing clause] -->|references| CITED[Cited clause]
+    NEW[New document root] -->|supersedes| OLD[Old document root]
 ```
 
 `relation_origin` is the closed v0.1 enum `structural`, `source_text`, or `manifest`. Structural relations are derived rather than stored as cross-reference occurrences. v0.1 admits no generated/probabilistic semantic edge. A future generated candidate requires a schema/vocabulary version change, explicit generator identity and confidence, review policy, and a non-authoritative state; it cannot become navigable merely because a model emitted it.
@@ -2220,24 +2222,15 @@ Adding, removing, or changing a resolver-relevant target edition therefore inval
 
 A compiled release may use the following layout:
 
-```text
-releases/
-└── <release_id>/
-    ├── manifest.json
-    ├── build-info.json
-    ├── evidence-vocabulary.json
-    ├── knowledge.sqlite
-    ├── lineage.json
-    ├── chunks.jsonl
-    ├── embeddings.f16.npy
-    ├── lexical-index/
-    ├── vector-index/
-    ├── models/                 # optional query-embedding and reranker assets
-    ├── documents/
-    ├── pages/
-    ├── reports/
-    ├── build-ledger.jsonl
-    └── evaluation-results.json
+```mermaid
+flowchart TD
+    RELEASES[releases/] --> RELEASE[release_id/]
+    RELEASE --> METADATA["manifest.json<br/>build-info.json<br/>evidence-vocabulary.json"]
+    RELEASE --> CATALOG["knowledge.sqlite<br/>lineage.json<br/>chunks.jsonl"]
+    RELEASE --> RETRIEVAL["embeddings.f16.npy<br/>lexical-index/<br/>vector-index/"]
+    RELEASE --> MODELS["models/<br/>optional query-embedding and reranker assets"]
+    RELEASE --> SOURCES["documents/<br/>pages/"]
+    RELEASE --> REPORTS["reports/<br/>build-ledger.jsonl<br/>evaluation-results.json"]
 ```
 
 `release_id` is the filesystem-safe token `rel-sha256-` plus 64 lowercase hexadecimal characters: the SHA-256 of a versioned RFC 8785 release-assembly identity record containing `build_content_id`, sorted `(relative_path, byte_size, sha256)` tuples for every release artifact except `manifest.json`, the complete assembly configuration, and `reproducible_build_epoch`; it excludes `release_id`, final manifest bytes, `active.json`, and all operational timestamps to avoid recursion. Any different admitted byte, declared assembly input, or epoch therefore produces a different ID. An optional human `release_label`, such as `2026.08`, is display metadata included in that identity record and is never used for equality, cursor binding, directory selection, or activation.
