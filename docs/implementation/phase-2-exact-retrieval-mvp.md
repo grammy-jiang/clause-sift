@@ -96,7 +96,7 @@ The Phase 2 implementation must not create placeholder results that claim those 
 
 ## 3. Critical compatibility rule: do not expose incomplete final evidence tools
 
-The final design makes `search_evidence` and `get_clause` success semantics depend on required context closure from Section 19. That traversal is owned by Phase 4.
+The final design makes `search_evidence` and `get_clause` success semantics depend on required context closure from `docs/design.md` Section 19. That traversal is owned by Phase 4.
 
 Therefore Phase 2 must separate **direct retrieval primitives** from the final evidence-returning public MCP tools.
 
@@ -113,7 +113,7 @@ get_document_metadata(document_id)
 get_page_reference(document_id, page_number)
 ```
 
-The literal function names may change, but their semantics must remain clearly different from the final Section 22 context-complete tools.
+The literal function names may change, but their semantics must remain clearly different from the final `docs/design.md` Section 22 context-complete tools.
 
 These primitives return direct source candidates and deterministic citation/provenance projections. They do not claim that required applicability, exception, dependency, conflict, or supporting context has already been closed.
 
@@ -136,7 +136,7 @@ Phase 2 should fully implement and advertise only MCP surfaces whose success sem
 - `standards://page/{document_id}/{page_number}`;
 - `standards://release/current`.
 
-The final `search_evidence`, `get_clause`, `get_context`, clause resource, and source/evidence assembly surfaces are not advertised as successful Phase 2 capabilities until their Section 19/21/22 contracts can be satisfied.
+The final `search_evidence`, `get_clause`, `get_context`, clause resource, and source/evidence assembly surfaces are not advertised as successful Phase 2 capabilities until their `docs/design.md` Sections 19, 21, and 22 contracts can be satisfied.
 
 If a compatibility stub is required by an implementation experiment, it must return the design-defined `feature_unavailable` error and must not emit a partial success object.
 
@@ -521,7 +521,7 @@ Comparator fields are never merged into it.
 
 ### 13.1 Materialize `evidence-vocabulary.json`
 
-Generate the exact Section 12.2 core vocabulary as deterministic RFC 8785 JSON containing the design-required:
+Generate the exact `docs/design.md` Section 12.2 core vocabulary as deterministic RFC 8785 JSON containing the design-required:
 
 - semantic version;
 - enum order/definitions;
@@ -671,7 +671,7 @@ An LLM may propose a review candidate outside the deterministic build, but it ca
 
 ### 16.4 Narrow inheritance
 
-Implement the exact Section 12.2 inheritance rules:
+Implement the exact `docs/design.md` Section 12.2 inheritance rules:
 
 - node type never inherits;
 - `mixed`/`unknown` do not become child normative status by generic inheritance;
@@ -899,7 +899,7 @@ Runtime following of these records remains Phase 4.
 
 ### 23.4 Phase 4 boundary
 
-Do not implement Section 19 traversal queues, context classes, path retention, conflict closure, or runtime relationship expansion in this phase.
+Do not implement `docs/design.md` Section 19 traversal queues, context classes, path retention, conflict closure, or runtime relationship expansion in this phase.
 
 ## 24. Work package 2.19: SQLite catalog schema
 
@@ -1124,6 +1124,8 @@ Compare:
 
 Select the engine/configuration only after quality comparison.
 
+The selected lexical configuration must also satisfy the Phase 2 blocking retrieval gates in Section 50.2: the one-sided 95% Wilson lower bound for expected evidence at Recall@20 is at least 98%, and the corresponding lower bound for expected evidence in the Top 5 is at least 95%, using independently labelled applicable cases and the Phase 0 sample-size rules. A candidate that is correctly benchmarked but misses either bound cannot be selected for an activatable Phase 2 release.
+
 Packaging convenience cannot justify materially worse retrieval.
 
 ### 28.5 Chinese tokenization decision
@@ -1261,7 +1263,7 @@ Define a Phase 2 internal/Python result object for direct candidates containing 
 - direct retrieval channel/rank/score;
 - deterministic citation string/fields.
 
-This is not named or advertised as the final Section 21 Evidence Package unless it fully satisfies that contract later.
+This is not named or advertised as the final `docs/design.md` Section 21 Evidence Package unless it fully satisfies that contract later.
 
 ## 33. Work package 2.28: Deterministic citations
 
@@ -1371,7 +1373,7 @@ clausesift mcp
 
 `search` and `get-clause` in the exact-retrieval milestone must clearly state in machine-readable/help semantics that they return **direct Phase 2 evidence** without Phase 4 context expansion.
 
-Do not label their structured output as a complete Section 21 Evidence Package.
+Do not label their structured output as a complete `docs/design.md` Section 21 Evidence Package.
 
 ### 36.4 Shared service layer
 
@@ -1439,14 +1441,59 @@ Do not expose absolute source paths or infer legal force.
 
 ## 39. Work package 2.34: MCP document listing
 
-Implement exact metadata filters with:
+Implement the final `docs/design.md` `list_documents` contract now because this tool is advertised as a completed Phase 2 surface.
 
-- normalized bound parameters;
-- deterministic ordering;
-- keyset cursor if required by the final design;
-- release-bound/authenticated cursor semantics where already specified;
-- strict result limit;
-- null/empty behavior consistent with the design.
+### 39.1 Stable order and page size
+
+- sort every result page by stable `(document_code, edition, document_id)` order;
+- constrain `limit` to 1-100 with default 50;
+- always return `items` and `next_cursor`;
+- return `next_cursor: null` on the final page.
+
+### 39.2 Mandatory opaque authenticated cursor
+
+The cursor is a versioned opaque authenticated encoding of exactly:
+
+```text
+{
+  release_id,
+  cursor_version,
+  order_version,
+  normalized_filters,
+  last_key
+}
+```
+
+where:
+
+- `normalized_filters` contains canonical `document_type`, `status`, and `discipline`, including null values;
+- `last_key` is the last emitted `(document_code, edition, document_id)` tuple;
+- the compact encoded cursor, including authentication tag, must never exceed the design's 4,096-scalar input/output bound.
+
+### 39.3 Strict keyset resumption
+
+Resume with a strict lexicographic keyset predicate over `(document_code, edition, document_id)`. Offset pagination is forbidden.
+
+Cursor/filter/release handling is exact:
+
+- invalid authentication -> `identifier_invalid`;
+- unsupported cursor/order version -> `identifier_invalid`;
+- filter mismatch -> `identifier_invalid`;
+- valid cursor bound to another active release -> `resource_not_found`.
+
+### 39.4 Cursor regression tests
+
+Cover:
+
+- maximum multibyte payload still within 4,096 scalars;
+- one-over/invalid cursor input;
+- tampering;
+- filter mutation;
+- release change;
+- duplicate code/edition prefixes distinguished by `document_id`;
+- empty page;
+- final page;
+- repeated pagination through an immutable release with zero gaps/duplicates.
 
 No lexical engine query is needed for document listing.
 
@@ -1574,7 +1621,7 @@ Phase 3/4 artefact hashes cannot appear until those artefacts exist.
 
 Every published Phase 2 milestone release is immutable/read-only.
 
-A rebuild creates a new release identity when admitted semantic/artifact inputs change.
+A rebuild creates a new release identity when admitted semantic/artefact inputs change.
 
 ### 44.2 Phase 2 release contents
 
@@ -1640,7 +1687,7 @@ Before publication/activation:
 6. run exact clause direct-lookup fixtures;
 7. run lexical direct-search fixtures;
 8. verify deterministic direct citation/page results;
-9. run metadata/list/page MCP smoke calls;
+9. run metadata/list/page MCP smoke calls, including multi-page `list_documents` cursor resumption;
 10. prove base runtime does not import build-only dependencies;
 11. prove no release bytes are modified.
 
@@ -1738,11 +1785,31 @@ Require zero failures for Phase 2-supported deterministic suites such as:
 - wrong-edition exact-lookup negatives;
 - source-hash/path integrity fixtures.
 
-### 50.2 Lexical probabilistic gates
+### 50.2 Lexical probabilistic blocking gates
 
-Measure and report:
+For the exact-retrieval milestone, lexical retrieval is an implemented release capability, so the design's retrieval thresholds are blocking now rather than deferred.
 
-- Recall@5/10/20;
+Require:
+
+- expected evidence present in Recall@20: **one-sided 95% Wilson lower confidence bound at least 98%**;
+- expected evidence present in Top 5: **one-sided 95% Wilson lower confidence bound at least 95%**.
+
+The gate report must include, for each metric:
+
+- numerator/successes;
+- denominator/applicable independently labelled cases;
+- point estimate;
+- one-sided 95% Wilson lower bound;
+- target;
+- pass/fail;
+- corpus/question/label-set versions;
+- excluded/not-applicable cases with reasons.
+
+Phase 0 sample-size rules apply independently: at least 150 applicable independently labelled cases for the 98% Recall@20 gate and at least 60 for the 95% Top-5 gate, increased when required strata would otherwise be underrepresented. A small exploratory seed cannot be used to claim either release gate.
+
+Also report, without replacing the two mandatory thresholds:
+
+- Recall@5/10;
 - MRR;
 - nDCG;
 - correct-document rate;
@@ -1751,7 +1818,7 @@ Measure and report:
 - table-evidence hit rate;
 - multilingual strata.
 
-Apply only the quality gates whose implemented feature semantics are valid in this milestone.
+A lexical configuration that misses either mandatory Wilson lower bound blocks Phase 2 release activation.
 
 ### 50.3 Deferred gates
 
@@ -1778,7 +1845,9 @@ A Phase 2 milestone release may be activated only when:
 - chunk/source/catalog gates pass;
 - exact clause coverage gate passes;
 - lexical index validates;
-- applicable Phase 2 evaluation gates pass;
+- Recall@20 one-sided 95% Wilson lower bound is at least 98% on the required independently labelled sample;
+- Top-5 evidence-presence one-sided 95% Wilson lower bound is at least 95% on the required independently labelled sample;
+- all other applicable Phase 2 evaluation gates pass;
 - static report is durable;
 - no Phase 2 release-blocking finding remains;
 - candidate checksums pass;
@@ -1888,11 +1957,16 @@ Cover:
 - Chinese tokenization;
 - filters;
 - default status;
-- deterministic mapping/order.
+- deterministic mapping/order;
+- Recall@20/Top-5 Wilson-gate exact pass/fail boundary calculations.
 
 ### 53.7 Citation tests
 
 Cover exact source/page reconstruction and no client/AI repair.
+
+### 53.8 `list_documents` cursor tests
+
+Cover the complete Section 39 cursor contract, including authentication, filter/release binding, ordering-version checks, strict keyset resumption, worst-case size, tampering, and no duplicates/gaps.
 
 ## 54. Work package 2.49: Integration tests
 
@@ -1915,7 +1989,7 @@ Implement end-to-end tests for:
 - candidate release assembly;
 - read-only runtime load;
 - basic CLI;
-- basic MCP metadata/list/page surfaces;
+- basic MCP metadata/list/page surfaces, including cursor pagination;
 - active pointer publication;
 - rollback.
 
@@ -1936,6 +2010,9 @@ At minimum inject:
 - exact clause coverage gap;
 - foreign-key violation;
 - lexical builder failure;
+- lexical Recall@20 gate failure;
+- lexical Top-5 gate failure;
+- invalid/tampered/stale-release document-list cursor;
 - evaluation execution failure;
 - quality-gate failure;
 - candidate checksum failure;
@@ -1964,6 +2041,7 @@ Use Phase 0 fixtures to pin:
 - deterministic citations;
 - cross-reference resolved/unresolved records;
 - SQLite query plans;
+- document-list pagination/cursor behavior;
 - release checksums/identity;
 - rollback behavior.
 
@@ -1995,6 +2073,8 @@ Phase 2 should produce implementation-facing docs/configuration for:
 - release layout;
 - runtime startup/rollback;
 - direct retrieval versus final Phase 4 evidence-tool boundary;
+- `list_documents` stable order/cursor contract;
+- lexical release-gate thresholds;
 - known unsupported/deferred capabilities.
 
 Do not duplicate the design document; link to normative sections and document implementation-specific decisions only.
@@ -2063,7 +2143,7 @@ Phase 2 is complete only when all of the following are true.
 16. SQLite enforces foreign keys/constraints and becomes byte-stable at the catalog gate.
 17. Every addressable clause has a unique, non-empty, byte-complete exact-lookup set with no out-of-subtree leakage.
 18. Required exact/filter catalog indexes exist and query-plan regression tests use them.
-19. A lexical engine/tokenizer is selected from Phase 0 benchmark evidence.
+19. A lexical engine/tokenizer is selected from Phase 0 benchmark evidence and meets the blocking Recall@20 and Top-5 Wilson lower-bound thresholds.
 20. Lexical query compilation prevents SQL/FTS expression injection.
 21. Exact clause direct lookup returns deterministic source candidates with no edition substitution.
 22. Lexical direct retrieval supports design-aligned metadata filters and active-status default.
@@ -2071,18 +2151,19 @@ Phase 2 is complete only when all of the following are true.
 24. Read-only runtime verifies release checksums/schema/vocabulary/catalog before serving.
 25. CLI builder/runtime commands use shared services and identify direct Phase 2 retrieval honestly.
 26. Basic MCP metadata/list/page/release surfaces satisfy their final schemas and protocol safety requirements.
-27. Final context-complete evidence MCP tools are not falsely advertised before Phase 4.
-28. Static Phase 2 reports are offline, escaped, deterministic where required, and show deferred capabilities explicitly.
-29. Phase 2 caches include complete declared identities and never bypass validation.
-30. Exact-retrieval milestone releases are immutable and contain no dummy Phase 3/4 artefacts.
-31. Candidate releases reopen successfully through the normal read-only runtime before activation.
-32. `active.json` publication and rollback are atomic and crash-tested.
-33. Phase 2 evaluation gates pass with sample counts/confidence intervals where applicable.
-34. Failures before activation do not modify the active release.
-35. Runtime operation does not modify release bytes.
-36. Base runtime does not import build/OCR dependencies.
-37. Phase 3 embeddings/fusion and Phase 4 traversal/reranking/refusal remain out of scope.
-38. Repository quality checks pass.
+27. `list_documents` uses mandatory stable `(document_code, edition, document_id)` keyset pagination with authenticated filter/order/release-bound cursors and no gaps/duplicates.
+28. Final context-complete evidence MCP tools are not falsely advertised before Phase 4.
+29. Static Phase 2 reports are offline, escaped, deterministic where required, and show deferred capabilities explicitly.
+30. Phase 2 caches include complete declared identities and never bypass validation.
+31. Exact-retrieval milestone releases are immutable and contain no dummy Phase 3/4 artefacts.
+32. Candidate releases reopen successfully through the normal read-only runtime before activation.
+33. `active.json` publication and rollback are atomic and crash-tested.
+34. Phase 2 evaluation gates pass with sample counts/confidence intervals where applicable; Recall@20 lower bound is at least 98% and Top-5 lower bound at least 95% on their independently labelled samples.
+35. Failures before activation do not modify the active release.
+36. Runtime operation does not modify release bytes.
+37. Base runtime does not import build/OCR dependencies.
+38. Phase 3 embeddings/fusion and Phase 4 traversal/reranking/refusal remain out of scope.
+39. Repository quality checks pass.
 
 ## 62. Risks and mitigations
 
@@ -2157,14 +2238,14 @@ Execute Phase 2 in this order.
 11. Build basic exact cross-reference records.
 12. Materialize SQLite catalog with constraints/indexes.
 13. Freeze catalog and run every Phase 2 blocking validation query.
-14. Benchmark lexical candidates/tokenizers on Phase 0 corpus.
-15. Select and implement lexical index builder/loader.
+14. Benchmark lexical candidates/tokenizers on Phase 0 corpus and enforce the mandatory Recall@20/Top-5 Wilson gates before selection.
+15. Select and implement lexical index builder/loader only from a passing configuration.
 16. Implement exact clause direct lookup.
 17. Implement lexical direct retrieval/filtering.
 18. Implement deterministic direct evidence/citations.
 19. Implement read-only runtime startup/integrity checks.
 20. Implement CLI surfaces.
-21. Implement basic MCP metadata/list/page/release surfaces.
+21. Implement basic MCP metadata/list/page/release surfaces, including mandatory authenticated keyset pagination for `list_documents`.
 22. Generate static Phase 2 review report.
 23. Implement Phase 2 cache identities.
 24. Run applicable Phase 0 regression evaluation.
@@ -2189,11 +2270,12 @@ Phase 2 is done when another implementation agent can reproduce, from repository
 - how every source byte maps to pages;
 - how chunks/source IDs are constructed and validated;
 - how exact clause lookup is made byte-complete and edition-safe;
-- how lexical retrieval is indexed, queried, filtered, and evaluated;
+- how lexical retrieval is indexed, queried, filtered, evaluated, and blocked when its mandatory Wilson bounds are missed;
 - how source-faithful direct evidence and citations are projected;
 - how SQLite invariants prevent cross-document or malformed evidence;
 - how the runtime opens an immutable release safely;
 - which CLI/MCP surfaces are valid at this milestone;
+- how `list_documents` paginates deterministically with authenticated release-bound keyset cursors;
 - why final evidence-returning MCP tools remain gated until Phase 4;
 - how build caches invalidate;
 - how candidate releases are validated, activated, and rolled back;
