@@ -76,9 +76,9 @@ The repository contains a precise, versioned specification for:
 - reviewer labels and adjudication;
 - corpus-version metadata;
 - calibration items;
-- metric result records.
+- corpus-validation and statistical-readiness records owned by Phase 0.
 
-These are evaluation artefacts only. They must reference source-grounded identity and later canonical IDs when those IDs become available, rather than inventing a second production evidence model.
+These are evaluation artefacts only. They must reference source-grounded identity and later canonical IDs when those IDs become available, rather than inventing a second production evidence model. Observed runtime-result or later-phase evaluator-result schemas are explicitly excluded from this Phase 0 outcome.
 
 ### 3.4 Human-review protocol
 
@@ -499,24 +499,30 @@ Identify a closed set of cases where traversal is prohibited, unresolved, guesse
 
 The corpus must support later evaluation of the design's versioned engineering evidence vocabulary.
 
-### 12.1 Coverage goals
+### 12.1 Complete vocabulary coverage
 
-Prepare examples for every applicable core value and edge case in the design, including:
+Prepare ground-truth coverage for **every** Section 12.2 core value and branch required by the design, not only values that happen to occur naturally in the selected 5-10 engineering documents. Coverage includes:
 
-- document types;
-- node types;
-- normative statuses;
-- source modalities;
-- classification origins;
-- inheritance branches;
+- every document type;
+- every canonical node type;
+- every normative-status value;
+- every source-modality value;
+- every classification-origin value;
+- every inheritance branch;
+- every worked classification edge case in the design;
 - normative and informative appendices;
 - nested notes;
 - manufacturer instructions;
-- multiple or unknown jurisdictions;
-- multiple or unknown disciplines;
+- multiple and unknown jurisdictions;
+- multiple and unknown disciplines;
 - `unclassified` and `unknown` cases;
 - forbidden composite aliases;
-- unsupported vocabulary/core/extension versions where synthetic fixtures are appropriate.
+- unsupported core versions;
+- unsupported extension versions and behavior-bearing extension negatives where the design requires them.
+
+If a required vocabulary value or negative case is absent from the representative private/local corpus, Phase 0 must add an independently reviewed rights-cleared or synthetic evaluation fixture that isolates that value. Synthetic fixtures are ground truth for vocabulary/schema conformance only; they do not masquerade as authoritative engineering standards or replace the representative real-document corpus.
+
+The coverage report must map every required Section 12.2 value, origin, inheritance branch, worked case, alias/version negative, and extension negative to at least one versioned fixture or source-grounded label. Missing coverage blocks the Phase 0 vocabulary baseline.
 
 ### 12.2 Labelling rule
 
@@ -557,13 +563,30 @@ Include hard negatives for:
 - compatible stricter requirements where the design's conflict model treats them as non-conflicting;
 - parser disagreement that must remain parser uncertainty rather than be promoted to a source conflict.
 
-### 13.3 No implicit winner
+### 13.3 Required Phase 0 conflict ground truth
 
-Every conflict item must state whether trusted precedence is explicitly encoded. A label with no encoded precedence must never contain a selected winner.
+Every conflict or explained-difference item must record independent Phase 0 ground truth before Phase 4 exists. At minimum, record:
+
+- expected candidate identity or provisional candidate key;
+- expected state (`confirmed`, `explained`, or `unresolved`);
+- ordered conflict dimensions;
+- explanation code when the expected state is `explained`;
+- precedence status;
+- controlling position only when trusted precedence is explicitly source-grounded;
+- every expected position in dense semantic order;
+- for each position, one or more exact source-grounded spans or evidence-label memberships identifying the material represented by that position;
+- applicability/context facts required to distinguish a real conflict from a hard negative;
+- reviewer provenance.
+
+A conflict item with no encoded precedence must never contain a selected winner. A three-position case must have three independently labelled positions; it cannot be reduced to pairwise summaries.
+
+The Phase 0 source-grounded position/spans are the independent expected result. They must not be generated later from Phase 4 output and then written back as ground truth.
 
 ### 13.4 Later canonicalisation
 
-Phase 4 will replace preliminary source-level conflict locators with exact versioned conflict IDs, positions, source IDs, and spans. Migration is reviewed rather than inferred silently.
+Phase 4 may map the Phase 0 provisional conflict/candidate/position locators to exact canonical `conflict_id`, position IDs, source IDs, node IDs, and spans once those production identities exist. That migration validates Phase 4 output against the pre-existing Phase 0 state, dimensions, position membership, source spans, precedence expectation, and explanation label; it does not create or reinterpret the expected conflict from the implementation under test.
+
+Any ambiguous or failed mapping remains visible for human review and cannot silently change the Phase 0 expected state or positions.
 
 ## 14. Work package 0.10: Invalid, ambiguous, and unsupported questions
 
@@ -613,22 +636,24 @@ Define three logical roles:
 - independent secondary reviewer;
 - adjudicator.
 
-A person may perform more than one role across different items, but the same individual must not act as both initial independent reviewers for one semantic release-gate item.
+A person may perform more than one role across different items, but the same individual must not act as both initial independent reviewers for one release-gate item.
 
 ### 16.2 Initial release-gate labelling
 
-For the initial release-gate corpus, two blinded reviewers independently label every item that requires human semantic judgement.
+For the initial release-gate corpus, **two blinded reviewers independently label every release-gate item**, including items whose eventual metric grader is deterministic/executable. Executable grading may later compare system output to the accepted label, but it does not replace the design-required initial independent human labelling pass.
 
 Each reviewer must record:
 
 - raw label;
 - evidence locator(s);
 - uncertainty flag;
-- rubric category;
+- rubric/category fields applicable to that item;
 - optional bounded rationale;
 - reviewer identifier;
 - rubric version;
 - timestamp in the review record where operational history requires it, without using wall-clock data as deterministic corpus identity.
+
+For a deterministic fixture, the reviewers independently verify the source/fixture identity and the expected deterministic value or relationship rather than inventing semantic interpretation. For a semantic item, they independently apply the blinded human rubric. No initial release-gate item is exempt from the two-reviewer pass merely because its eventual comparison is executable.
 
 The same two reviewers whose agreement is measured on the release sample must also independently grade the complete blinded calibration set for that release cycle. Calibration results from a different reviewer pair cannot satisfy the release-sample reliability gate.
 
@@ -655,11 +680,11 @@ Report agreement before adjudication.
 
 - Nominal labels use unweighted Cohen's kappa.
 - Ordinal labels use the rubric's preregistered fixed weight matrix.
-- A computable coefficient must be at least 0.80 on the release sample and calibration set.
-- If the release sample is degenerate because both reviewers assign every item to the same category, report kappa as `not_estimable`.
-- The degenerate release sample passes reliability only with exactly 100% raw agreement and a computable calibration kappa of at least 0.80, produced by the same two reviewers who labelled that release sample and using at least two observed categories.
-- A degenerate calibration result blocks the gate.
-- Any release-sample disagreement in the degenerate fallback case blocks the gate.
+- A computable coefficient must be at least 0.80 on the release sample and calibration set where that coefficient is defined by the rubric.
+- If the release sample is degenerate because both reviewers assign every item to the same single category for a rubric dimension, report that dimension's kappa as `not_estimable`.
+- The degenerate release sample passes that reliability dimension only with exactly 100% raw agreement and a computable calibration kappa of at least 0.80, produced by the same two reviewers who labelled that release sample and using at least two observed categories.
+- A degenerate calibration result blocks the affected rubric gate.
+- Any release-sample disagreement in the degenerate fallback case blocks the affected rubric gate.
 - Disagreements are adjudicated by a third reviewer.
 
 The evaluation tooling must retain raw labels, category counts, agreement, coefficient computability, reviewer-pair identity, adjudication, and final labels.
@@ -791,15 +816,17 @@ Implement deterministic utilities for:
 - duplicate question-ID detection;
 - duplicate or conflicting source-hash detection;
 - corpus-document coverage reporting;
+- complete vocabulary/fixture coverage reporting;
 - taxonomy/stratum coverage reporting;
 - split-overlap detection;
 - rights-status validation;
 - forbidden source-file detection;
-- reviewer-role validation;
+- reviewer-role and initial dual-review validation;
 - calibration-set completeness checks;
 - Wilson lower-bound calculation with unit tests;
 - Cohen's kappa calculation or a pinned, reviewed dependency with deterministic wrapper tests;
 - corpus/version consistency checks;
+- conflict ground-truth completeness validation;
 - safe generation of static summary reports without embedding untrusted data as active content.
 
 ### 19.2 Ground-truth export boundary
@@ -837,8 +864,11 @@ Add tests for:
 - invalid page/clause locators;
 - invalid split overlap;
 - invalid reviewer combinations;
+- missing initial second-review labels;
 - missing calibration categories;
 - rights-review blocking cases;
+- incomplete Section 12.2 vocabulary fixture coverage;
+- incomplete conflict positions or source spans;
 - Wilson interval boundary cases;
 - kappa computable and non-computable cases;
 - degenerate-sample fallback rules;
@@ -851,8 +881,11 @@ The corpus validator should include intentionally invalid fixture records provin
 
 - a question referring to a non-existent evidence label;
 - an evidence label referring to the wrong document edition;
+- a conflict label that omits one expected position;
 - a conflict label that declares a winner without encoded precedence;
 - a classification label using a forbidden composite alias;
+- a vocabulary baseline that lacks one Section 12.2 core value or required negative fixture;
+- an initial release-gate item with only one reviewer label;
 - an item simultaneously placed in held-out and development splits when the split policy forbids it;
 - a redistributable flag without the required rights decision;
 - a semantic label with no source/reviewer provenance.
@@ -879,7 +912,7 @@ Includes:
 - public/private fixture status;
 - known gaps.
 
-### 21.2 Question coverage report
+### 21.2 Question and ground-truth coverage report
 
 Includes:
 
@@ -888,13 +921,16 @@ Includes:
 - counts by language;
 - answerability distribution;
 - document coverage;
+- complete Section 12.2 value/origin/inheritance/negative-fixture coverage;
 - table/context/conflict/vocabulary coverage;
+- conflict state/dimension/position/source-span coverage;
 - development/benchmark/held-out/calibration split counts.
 
 ### 21.3 Reviewer-quality report
 
 Includes:
 
+- initial release-gate dual-review completeness;
 - reviewer coverage;
 - reviewer-pair identity for release/calibration agreement;
 - uncertain-item count;
@@ -927,6 +963,8 @@ Phase 1 parser benchmarking may begin only after the following Phase 0 baseline 
 - Every answerable question has reviewed source-grounded evidence labels.
 - Unanswerable/ambiguous/unsupported-inference cases exist.
 - English, Chinese, and cross-language cases exist.
+- Every Section 12.2 vocabulary value/origin/inheritance branch and required invalid/extension case has at least one reviewed source or isolated fixture.
+- Conflict ground truth records expected states, dimensions, positions, and source spans/evidence memberships before Phase 4.
 - Evaluation schemas validate with no errors.
 - Split leakage checks pass.
 - Corpus validation and statistical helper unit tests pass.
@@ -960,11 +998,11 @@ Phase 2 will bind Phase 0 document/evidence locators to production manifest, can
 
 ### 24.2 Phase 3
 
-Phase 3 will use the benchmark and held-out query splits to compare embedding models and hybrid retrieval without tuning on the final release gate. Multilingual tags and retrieval categories must permit segmented reporting.
+Phase 3 will use the benchmark and held-out query splits to compare embedding models and hybrid retrieval without tuning on the final held-out release gate. Multilingual tags and retrieval categories must permit segmented reporting.
 
 ### 24.3 Phase 4
 
-Phase 4 will resolve context and conflict labels to exact Evidence Graph edge paths, conflict IDs, positions, source IDs, and warnings. Phase 0's source-grounded cases must remain traceable after this migration.
+Phase 4 will map the pre-existing Phase 0 context/conflict labels to exact Evidence Graph edge paths, conflict IDs, positions, source IDs, and warnings. Phase 0's source-grounded expected states, dimensions, positions, spans, and context cases remain authoritative evaluation labels during that migration.
 
 ## 25. Acceptance criteria
 
@@ -977,16 +1015,18 @@ Phase 0 implementation is accepted only when all of the following are true.
 5. The set includes exact identifiers, definitions, scope/applicability, source modalities, exceptions, notes, tables/units, products, references, version differences, conflicts, unanswerable/ambiguous inputs, unsupported inference, and multilingual cases.
 6. Every answerable question has source-grounded expected evidence.
 7. Wrong-edition, prohibited-edge, unsupported-inference, and other hard-negative fixtures are represented explicitly.
-8. Context/traversal and conflict cases are defined in a form that can later migrate to exact canonical IDs and edge paths.
-9. Evaluation schemas are versioned and closed enough to detect malformed or ambiguous records.
-10. Reviewer, calibration, agreement, and adjudication procedures implement the design's rules, including same-reviewer-pair calibration.
-11. Statistical tooling correctly implements one-sided 95% Wilson lower bounds and reports numerator/denominator.
-12. The release-gate expansion plan identifies the minimum 150-case and 60-case requirements for the applicable probabilistic metrics, keeps every independently reported conflict state/code family separate, and documents stratification.
-13. Development, benchmark, held-out, and calibration splits have explicit leakage rules.
-14. Phase 0 ground-truth exports carry the expected answerability/refusal, evidence, context, classification, and conflict label identities needed for later evaluators; observed system-result adapters remain explicitly out of scope.
-15. Corpus validation tests pass.
-16. Markdown and repository documentation checks pass in CI.
-17. A Phase 0 readiness report lists any remaining coverage gaps and does not claim release-gate readiness unless the sample requirements have actually been met.
+8. Every Section 12.2 core value, classification origin, inheritance branch, worked edge case, required legacy-alias/version negative, and required extension negative has reviewed fixture coverage even when absent from the selected real documents.
+9. Context/traversal cases are defined in a form that can later migrate to exact canonical IDs and edge paths.
+10. Conflict cases already contain expected state, dimensions, positions, source spans/evidence memberships, explanation/precedence expectations, and reviewer provenance before Phase 4 canonical IDs exist.
+11. Evaluation schemas are versioned and closed enough to detect malformed or ambiguous records, and do not define later observed runtime-result schemas.
+12. Every initial release-gate item has two independent blinded reviewer labels; calibration, agreement, and adjudication procedures implement the design's same-reviewer-pair rules.
+13. Statistical tooling correctly implements one-sided 95% Wilson lower bounds and reports numerator/denominator.
+14. The release-gate expansion plan identifies the minimum 150-case and 60-case requirements for the applicable probabilistic metrics, keeps every independently reported conflict state/code family separate, and documents stratification.
+15. Development, benchmark, held-out, and calibration splits have explicit leakage rules.
+16. Phase 0 ground-truth exports carry the expected answerability/refusal, evidence, context, classification, and conflict label identities needed for later evaluators; observed system-result adapters remain explicitly out of scope.
+17. Corpus validation tests pass.
+18. Markdown and repository documentation checks pass in CI.
+19. A Phase 0 readiness report lists any remaining coverage gaps and does not claim release-gate readiness unless the sample requirements have actually been met.
 
 ## 26. Explicit non-goals
 
@@ -999,7 +1039,7 @@ Phase 0 must not:
 - implement production chunking;
 - implement the Evidence Graph;
 - implement runtime context traversal;
-- create final conflict records without source support;
+- create production conflict IDs or runtime conflict closure;
 - build a vector index;
 - implement CLI/MCP behaviour;
 - define observed runtime/evaluator result schemas owned by later phases;
@@ -1062,8 +1102,8 @@ Execute Phase 0 in this order.
 4. Select and freeze representative corpus `v0001`.
 5. Create preliminary source/evidence locators.
 6. Author the 30-50 exploratory questions.
-7. Independently review and adjudicate semantic labels.
-8. Create context, vocabulary, classification, conflict, and hard-negative subsets.
+7. Independently dual-review every initial release-gate label and adjudicate disagreements.
+8. Complete context, full vocabulary/classification, conflict-position, and hard-negative ground truth.
 9. Create multilingual variants and cross-language cases.
 10. Define development/benchmark/held-out/calibration splits.
 11. Implement statistical and reviewer-quality utilities.
@@ -1084,7 +1124,7 @@ Phase 0 is done when another implementation agent can begin Phase 1 without need
 - which questions must succeed or fail;
 - how multilingual, table, edition, context, conflict, classification, and hard-negative behaviour is represented;
 - how labels were reviewed;
-- how later metrics will be calculated;
+- how later metrics will be calculated from independently frozen ground truth;
 - which source files may or may not be redistributed;
 - what constitutes a regression;
 - what is still exploratory rather than release-gate evidence.
