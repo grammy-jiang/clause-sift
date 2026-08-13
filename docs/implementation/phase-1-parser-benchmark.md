@@ -21,7 +21,7 @@ Phase 1 must answer the following questions with reproducible measurements:
 3. Which parser/OCR path is appropriate for scanned or difficult documents?
 4. Which alternative parser paths are useful as **configured routing alternatives** for other document classes, without creating a silent fail-open fallback after a parser failure?
 5. Which parser disagreements must block later canonicalization?
-6. Which below-threshold differences may be admitted while remaining visible as parser uncertainty?
+6. Which non-zero differences within the admitted comparison threshold may be admitted while remaining visible as parser uncertainty?
 7. What review burden does each parser path impose on an engineer?
 8. Are the selected outputs deterministic enough to become stable inputs to Phase 2?
 
@@ -191,9 +191,11 @@ Define a closed, versioned parser-neutral envelope containing at least:
 - parser warnings;
 - OCR summary;
 - extraction statistics;
-- deterministic content hash of the parser-neutral payload.
+- deterministic content hash of the parser-neutral payload, computed over the non-recursive preimage defined below.
 
 Operational run IDs and wall-clock observations must be kept outside deterministic parser-neutral content identity.
+
+The parser-neutral content digest has one normative preimage. Version `parser-neutral-content.v1` is the deterministic canonical serialization of the complete parser-neutral envelope **with the content-hash field omitted**. The stored content-hash field is then `sha256:` plus the lowercase SHA-256 of those preimage bytes. Implementations must not hash an envelope containing its own populated digest, substitute null/empty-string conventions, or choose a parser-specific preimage. A separate hash of the complete serialized artifact may be used by storage/reporting code, but it is a different explicitly named digest and is not the parser-neutral content hash.
 
 ### 6.3 Page records
 
@@ -304,7 +306,8 @@ Requirements:
 - no raw exception object serialization;
 - finite numeric values only;
 - explicit nulls when a field is defined but unavailable;
-- stable representation of bounding boxes and dimensions.
+- stable representation of bounding boxes and dimensions;
+- one versioned `parser-neutral-content.v1` hash projection that omits only the content-hash field itself.
 
 ## 7. Work package 1.2: Define the parser adapter interface
 
@@ -551,7 +554,7 @@ At minimum, every selected final candidate/configuration must be parsed multiple
 
 ## 12. Work package 1.7: Single-parser validation heuristics
 
-Implement the Section 11.3 validation checks as independent, versioned benchmark rules.
+Implement the parser-validation checks required by `docs/design.md` Section 11.3 as independent, versioned benchmark rules.
 
 ### 12.1 Page count
 
@@ -850,7 +853,7 @@ The comparison engine rejects a pair unless:
 
 ### 17.2 Blocking conditions
 
-For a comparison-mode benchmark document, treat the following as blocking exactly as required by the design:
+For a comparison-mode benchmark document, treat the following as blocking exactly as required by `docs/design.md` Section 11.3:
 
 - either adapter fails;
 - source/parser page-count mismatch;
@@ -858,8 +861,8 @@ For a comparison-mode benchmark document, treat the following as blocking exactl
 - normative clause present in only one output;
 - exception present in only one output;
 - table present in only one output;
-- source role/modality marker present in only one output where benchmark ground truth requires comparison;
-- page mapping present/correct in only one output for material evidence;
+- source role/modality marker present in only one output;
+- page mapping present in only one output;
 - clause identity mismatch;
 - clause ordering mismatch;
 - material evidence-vocabulary classification disagreement where Phase 1 is explicitly testing preserved source markers/provisional deterministic adapter projection;
@@ -869,16 +872,20 @@ For a comparison-mode benchmark document, treat the following as blocking exactl
 - cell-value mismatch;
 - any versioned comparison metric over its admitted threshold.
 
-### 17.3 Below-threshold differences
+The two “present in only one output” gates for source role/modality markers and page mappings apply to the complete parser-neutral outputs, not only to Phase 0-labelled representative spans. Phase 0 labels help evaluate correctness, but absence of a label cannot downgrade a parser-to-parser disagreement that the design declares blocking.
+
+### 17.3 Admitted non-zero differences
 
 A comparison may pass with a non-zero difference only when:
 
-- the difference is below a versioned admitted threshold;
-- it is not one of the unconditional blocking categories above;
+- the metric value is **at or below** the versioned admitted threshold;
+- the difference is not one of the unconditional blocking categories above;
 - the exact difference is retained in the report;
 - the report marks `parser_comparison_difference`;
 - the primary output remains unchanged;
 - no field-level merge occurs.
+
+The boundary is normative: an otherwise admissible metric difference exactly equal to the configured threshold passes; the first representable/tested value above it blocks. Exact-at and one-over fixtures must exercise this rule.
 
 ### 17.4 Primary selection
 
@@ -910,7 +917,9 @@ For each run/pair include:
 - roles;
 - isolation configuration/results;
 - standalone validation results;
-- parser-neutral output hashes;
+- **both complete parser-neutral output artefacts when they were produced**, retained as durable report-package members with deterministic relative names and hashes;
+- an explicit sanitized failure record in place of each output that was not produced;
+- parser-neutral output hashes and deterministic relative report-package references;
 - comparison configuration;
 - every comparison metric;
 - every disagreement;
@@ -920,6 +929,8 @@ For each run/pair include:
 - advisory differences;
 - review-cost data;
 - benchmark label-set version.
+
+The report index must be sufficient to resolve each produced output from the durable report package by a safe relative artifact identifier and verify it by hash. A comparison report containing only hashes/metrics while discarding the produced parser-neutral outputs is invalid. Failed reports remain diagnostic and are not treated as canonical authority.
 
 ### 18.3 Failure reports
 
@@ -1218,7 +1229,9 @@ Test:
 - malformed table grid/spans;
 - invalid OCR confidence;
 - absolute-path rejection;
-- secret/path sentinel rejection.
+- secret/path sentinel rejection;
+- `parser-neutral-content.v1` digest recomputation with the digest field excluded from its own preimage;
+- rejection of a digest calculated from a different/null/self-inclusive preimage convention.
 
 ### 26.2 Adapter identity
 
@@ -1233,7 +1246,7 @@ Test that identity changes when:
 
 ### 26.3 Validation heuristics
 
-Create deterministic fixtures for every Section 11.3 heuristic:
+Create deterministic fixtures for every parser-validation heuristic required by `docs/design.md` Section 11.3 and implemented in this plan's Section 12:
 
 - page count;
 - missing text;
@@ -1253,11 +1266,13 @@ Test:
 - invalid same-implementation pair rejected;
 - primary/comparator ordering;
 - each unconditional blocking disagreement;
-- threshold exact-at and one-over boundaries;
-- below-threshold advisory difference;
+- marker/page-mapping one-sided presence blocks even when outside Phase 0 representative labels;
+- threshold exact-at passes and one-over blocks for an otherwise admissible metric;
+- admitted non-zero advisory difference;
 - no field-level merge;
 - deterministic primary selection after pass;
-- failed comparison never promotes output.
+- failed comparison never promotes output;
+- both produced parser-neutral outputs remain resolvable and hash-verifiable from the durable report package.
 
 ### 26.5 Routing
 
@@ -1301,11 +1316,11 @@ Use a Phase 0 critical-comparison candidate and inject:
 - table disagreement;
 - page-mapping disagreement;
 - OCR/text disagreement;
-- passing below-threshold difference.
+- passing non-zero difference exactly at the admitted threshold.
 
-For failures, the benchmark must finalize the complete diagnostic comparison report and promote no selected downstream parser output.
+For failures, the benchmark must finalize the complete diagnostic comparison report, retain every parser-neutral output that was actually produced (with a sanitized failure record only for a missing output), and promote no selected downstream parser output.
 
-For a passing below-threshold difference, the report retains the difference and the selected primary artefact remains byte-identical to the standalone primary output.
+For a passing non-zero difference at or below the threshold, the report retains the difference and the selected primary artefact remains byte-identical to the standalone primary output.
 
 ### 27.4 Numeric table disagreement
 
@@ -1358,7 +1373,7 @@ For every primary/comparator candidate pair include:
 
 - role order;
 - independent implementation proof;
-- output hashes;
+- durable relative references to both produced parser-neutral output artefacts, with hashes, or sanitized failure records for missing outputs;
 - comparison metrics;
 - blocking disagreements;
 - advisory differences;
@@ -1406,7 +1421,7 @@ A recommended comparator must additionally:
 - be a distinct implementation family;
 - detect injected material disagreements;
 - never merge into primary output;
-- preserve a complete diagnostic report on failure;
+- preserve a complete diagnostic report including both produced parser-neutral outputs or sanitized failure records for missing outputs;
 - support deterministic comparison decisions.
 
 ### 30.3 Threshold decision rule
@@ -1414,10 +1429,12 @@ A recommended comparator must additionally:
 For heuristic thresholds not already fixed by the design:
 
 1. derive candidate values from benchmark distributions and labelled errors;
-2. test exact-at/one-over boundaries;
+2. test exact-at and first-value-over boundaries;
 3. document false-positive/false-negative consequences;
 4. prefer blocking uncertainty for critical evidence when evidence is insufficient;
 5. record unresolved threshold decisions rather than inventing a convenient number.
+
+For a configured comparison metric whose design rule is “blocks when it exceeds the threshold,” exact equality is admissible unless another unconditional blocking condition applies.
 
 ## 31. Handoff to Phase 2
 
@@ -1455,29 +1472,31 @@ Phase 1 must not implement those Phase 2 responsibilities in advance.
 
 Phase 1 is complete only when all of the following are true.
 
-1. A versioned parser-neutral intermediate schema exists and covers every Section 11.2 field class.
+1. A versioned parser-neutral intermediate schema exists and covers every field class required by `docs/design.md` Section 11.2.
 2. At least the design's initial parser-path classes are represented by benchmark adapters: structured PDF, deterministic page/coordinate extraction, and OCR/difficult-document extraction.
 3. Every adapter runs only through the common isolation boundary.
 4. Isolation adversarial tests pass and failure to establish isolation is blocking.
-5. Every Section 11.3 single-parser validation heuristic is implemented and tested.
+5. Every single-parser validation heuristic required by `docs/design.md` Section 11.3 and implemented in this plan's Section 12 is implemented and tested.
 6. The comparison engine rejects same-implementation “dual” parsing.
 7. Primary/comparator roles are explicit and ordered.
-8. All unconditional blocking comparison conditions are implemented and tested.
-9. Below-threshold differences remain visible as `parser_comparison_difference` and never cause field-level merging.
-10. Phase 0 critical-comparison candidates have been benchmarked with two independent parser implementations.
-11. Structural, page, coordinate, table, OCR, text, build-time, resource, and review-cost metrics are reported separately.
-12. Complex table and numeric-integrity fixtures are included.
-13. OCR-sensitive fixtures are included.
-14. Selected route outputs are reproducible/byte-identical under repeat runs with unchanged inputs.
-15. Parser identity includes implementation, version, adapter, configuration, assets, and role.
-16. A default primary route or deterministic set of primary routing recommendations is selected from evidence.
-17. An independent comparator recommendation exists for the critical-document path.
-18. An OCR route recommendation exists or is explicitly unresolved with a documented benchmark gap.
-19. Any fallback recommendation is defined as a configured alternative route, never a silent fail-open retry.
-20. Rejected candidates and unresolved decisions are documented.
-21. The Phase 1 decision record is sufficient for Phase 2 to implement production routing without relying on private chat history.
-22. No production canonical model, catalog, retrieval, MCP/CLI, or immutable release functionality has been pulled into the Phase 1 implementation plan.
-23. Repository documentation checks pass.
+8. All unconditional blocking comparison conditions from `docs/design.md` Section 11.3 are implemented and tested without Phase 0-label qualifiers on one-sided source-marker or page-mapping presence.
+9. A non-zero comparison metric at or below its admitted threshold remains visible as `parser_comparison_difference`, while values above the threshold block; no field-level merging occurs.
+10. Every durable comparison report retains both produced parser-neutral outputs or a sanitized failure record for each missing output.
+11. The parser-neutral content digest has one versioned non-recursive preimage that excludes the content-hash field itself.
+12. Phase 0 critical-comparison candidates have been benchmarked with two independent parser implementations.
+13. Structural, page, coordinate, table, OCR, text, build-time, resource, and review-cost metrics are reported separately.
+14. Complex table and numeric-integrity fixtures are included.
+15. OCR-sensitive fixtures are included.
+16. Selected route outputs are reproducible/byte-identical under repeat runs with unchanged inputs.
+17. Parser identity includes implementation, version, adapter, configuration, assets, and role.
+18. A default primary route or deterministic set of primary routing recommendations is selected from evidence.
+19. An independent comparator recommendation exists for the critical-document path.
+20. An OCR route recommendation exists or is explicitly unresolved with a documented benchmark gap.
+21. Any fallback recommendation is defined as a configured alternative route, never a silent fail-open retry.
+22. Rejected candidates and unresolved decisions are documented.
+23. The Phase 1 decision record is sufficient for Phase 2 to implement production routing without relying on private chat history.
+24. No production canonical model, catalog, retrieval, MCP/CLI, or immutable release functionality has been pulled into the Phase 1 implementation plan.
+25. Repository documentation checks pass.
 
 ## 33. Risks and mitigations
 
@@ -1540,7 +1559,7 @@ Phase 1 is complete only when all of the following are true.
 Implement Phase 1 in this order.
 
 1. Load the frozen Phase 0 parser-benchmark pack.
-2. Define parser-neutral schema and deterministic serialization.
+2. Define parser-neutral schema, non-recursive content-hash projection, and deterministic serialization.
 3. Define adapter identity and failure contracts.
 4. Implement/verify parser subprocess isolation.
 5. Add adversarial isolation fixtures.
@@ -1550,16 +1569,17 @@ Implement Phase 1 in this order.
 9. Implement single-parser validation heuristics.
 10. Build table, OCR, page/coordinate, and structural benchmark subsets.
 11. Implement the independent comparison engine.
-12. Implement benchmark-only routing configuration.
-13. Execute standalone candidate matrix.
-14. Execute primary/comparator pair matrix.
-15. Run repeat/determinism tests.
-16. Conduct blinded review-cost sampling.
-17. Generate per-document and aggregate reports.
-18. Apply accuracy-first hard gates.
-19. Select primary/comparator/OCR/configured-alternative recommendations.
-20. Record unresolved thresholds/gaps.
-21. Freeze the Phase 1 parser-routing decision package for Phase 2.
+12. Implement durable comparison-report packaging that retains produced outputs.
+13. Implement benchmark-only routing configuration.
+14. Execute standalone candidate matrix.
+15. Execute primary/comparator pair matrix.
+16. Run repeat/determinism tests.
+17. Conduct blinded review-cost sampling.
+18. Generate per-document and aggregate reports.
+19. Apply accuracy-first hard gates.
+20. Select primary/comparator/OCR/configured-alternative recommendations.
+21. Record unresolved thresholds/gaps.
+22. Freeze the Phase 1 parser-routing decision package for Phase 2.
 
 Any material benchmark-ground-truth correction returns through Phase 0's versioned label-change process rather than being edited silently inside Phase 1.
 
@@ -1570,9 +1590,11 @@ Phase 1 is done when a Phase 2 implementation agent can determine, from reposito
 - how to invoke every selected parser safely;
 - exactly what parser-neutral output means;
 - how parser identity and configuration are hashed/versioned;
+- how the parser-neutral content digest is computed without self-reference;
 - how to validate a standalone parser result;
 - when comparison mode blocks;
 - how independent parser pairs are proved;
+- how both produced parser outputs remain inspectable in a comparison report;
 - which primary/comparator/OCR routes were selected and why;
 - which alternative route applies to which source class;
 - which choices remain unresolved;
