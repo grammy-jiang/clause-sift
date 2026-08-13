@@ -3,18 +3,18 @@
 **Project:** ClauseSift  
 **Phase:** 2 — Exact Retrieval MVP  
 **Status:** Normative current-design corrective implementation plan  
-**Primary design authority:** `docs/design.md` Sections 7.2, 17, 19-22, 26-27, 29, and 31  
-**Companions:** `phase-2-required-context-closure.md`, `phase-2-material-conflict-closure.md`, `phase-2-mcp-wire-resources.md`
+**Primary design authority:** `docs/design.md` Sections 7.2, 17, 19-23, 26-27, 29, and 31  
+**Companions:** `docs/implementation/phase-2-required-context-closure.md`, `docs/implementation/phase-2-material-conflict-closure.md`, `docs/implementation/phase-2-mcp-wire-resources.md`
 
 ## 1. Purpose
 
-Current `docs/design.md` assigns Phase 2 the ordinary context-complete exact/lexical evidence path. Phase 2 therefore owns one shared service that takes exact/lexical direct seeds through required graph closure, material-conflict fixed-point closure, strict Evidence Package serialization, and Python/CLI/MCP projection.
+Current `docs/design.md` assigns Phase 2 the ordinary context-complete exact/lexical evidence path. Phase 2 therefore owns one shared service that takes exact/lexical direct seeds through required graph closure, material-conflict fixed-point closure, strict Evidence Package serialization, and the public Python/CLI/MCP surfaces actually defined by the design.
 
-This plan does not add Phase 3 dense/RRF seed retrieval or Phase 4 reranking/supporting-context high-accuracy behavior.
+This plan does not add Phase 3 dense/RRF seed retrieval or Phase 4 reranking/automatic high-accuracy supporting-context expansion.
 
 ## 2. One shared service
 
-The only ordinary evidence pipeline is:
+The ordinary evidence pipeline is:
 
 ```text
 validated request
@@ -22,9 +22,10 @@ validated request
   -> required Evidence Graph closure
   -> material-conflict closure
   -> repeat graph/conflict closure to least fixed point
+  -> optional traversal only when the requested API operation explicitly asks for it
   -> strict Evidence Package serializer
   -> typed Python result/error
-  -> CLI/MCP adapters
+  -> public adapter for that operation
 ```
 
 Adapters do not reimplement SQL, traversal, conflict, warning, pagination, or serialization logic.
@@ -89,18 +90,24 @@ A valid search with no direct matches is still a successful result, not a not-fo
 
 ## 6. Required graph/conflict handoff
 
-Every evidence-bearing Phase 2 request enters the fixed point defined by the required-context and material-conflict appendices.
+Every evidence-bearing Phase 2 request first enters the fixed point defined by the required-context and material-conflict appendices.
 
-Success occurs only after:
+Required completion occurs only after:
 
 - required graph closure has satisfied or visibly represented all admitted required obligations;
 - every material confirmed/unresolved conflict side required by the current release has been attached;
 - newly attached conflict sources receive their own required closure;
 - graph/conflict closure reaches the deterministic fixed point;
-- all applicable bounds pass;
-- central strict serialization passes.
+- all applicable required bounds pass.
 
 If complete required closure would exceed a declared bound, return `context_limit_exceeded` and publish no partial Evidence Package.
+
+After the required fixed point:
+
+- ordinary exact/lexical search and exact-clause retrieval stop at required context;
+- **the Phase 2 Python/MCP `get_context` operation may explicitly request `supporting` or `diagnostic` traversal**, with each level including the preceding levels and the current optional-truncation semantics;
+- **there is no CLI `get-context` command in the current Section 23.1 CLI surface**;
+- automatic supporting-context expansion for an ordinary `high_accuracy` search remains Phase 4 scope.
 
 ## 7. Evidence Package roots
 
@@ -130,7 +137,7 @@ Assembly provenance uses only current closed fields such as selection roles, see
 
 ## 10. Context targets
 
-A valid required traversal may reach an empty structural node with no source text. Represent it only in `context_targets` using the exact safe catalog/manifest projection and accepted paths. Never fabricate original text/citation/page/source lineage for an empty node.
+A valid traversal may reach an empty structural node with no source text. Represent it only in `context_targets` using the exact safe catalog/manifest projection and accepted paths. Never fabricate original text/citation/page/source lineage for an empty node.
 
 ## 11. Conflicts
 
@@ -140,7 +147,10 @@ Reject missing records/positions/source covers, one-sided conflict projection, w
 
 ## 12. Completeness and errors
 
-Use only `complete`, `incomplete_required`, and `truncated_optional` under their exact design conditions. Required bound overflow is `context_limit_exceeded` with no partial success.
+Use only `complete`, `incomplete_required`, and `truncated_optional` under their exact design conditions.
+
+- required bound overflow is `context_limit_exceeded` with no partial success;
+- explicit optional traversal stops before the first over-bound optional candidate in deterministic order, preserves complete required closure, sets `truncated_optional`, and emits the permitted `context_truncated` diagnostic.
 
 ## 13. Typed warnings
 
@@ -153,13 +163,25 @@ Two warning cases are explicitly mandatory:
 
 Warnings use code-owned messages and closed safe details.
 
-## 14. Evidence tools
+## 14. Public evidence operations
 
-`search_evidence`, `get_clause`, and `get_context` implement current Section 22 semantics directly and all call the shared service. Metadata/list/page tools remain exact safe projections without invented evidence semantics.
+### Python API
+
+The typed Python service exposes the design-defined evidence operations, including search, exact clause retrieval, and context inspection. Python `get_context` supports explicit `required`, `supporting`, and `diagnostic` levels according to Section 19.
+
+### MCP tools
+
+MCP exposes `search_evidence`, `get_clause`, and `get_context` plus the metadata/list/page tools defined by Section 22. MCP `get_context` uses the same service and optional traversal semantics as Python.
+
+### CLI
+
+The current Section 23.1 CLI evidence commands are **`clausesift search` and `clausesift get-clause`**. They call the same shared evidence service and cannot drop source/context/conflict/warning semantics in machine-readable output.
+
+**Do not add a `clausesift get-context` command in Phase 2.** Context inspection is a Python/MCP operation unless the design is explicitly changed later.
 
 ## 15. MCP resources are separate contracts
 
-MCP resources obey `phase-2-mcp-wire-resources.md` and Section 22.3 exactly.
+MCP resources obey `docs/implementation/phase-2-mcp-wire-resources.md` and Section 22.3 exactly.
 
 - the clause resource is context-complete where the design specifies it;
 - **the source resource is not an Evidence Package projection**: `standards://source/{source_id}` returns only validated source chunk `original_text` with exact `text/plain;charset=utf-8` MIME and no wrapper;
@@ -167,55 +189,71 @@ MCP resources obey `phase-2-mcp-wire-resources.md` and Section 22.3 exactly.
 
 A richer evidence tool does not alter a resource's canonical byte contract.
 
-## 16. CLI and Python API
-
-The typed Python API is the canonical service layer. CLI search/get-clause/get-context use the same evidence service and machine-readable output cannot drop evidence semantics, warnings, context targets, conflicts, or typed errors.
-
-Do not expose a second public direct-evidence API that could be mistaken for complete ordinary evidence.
-
-## 17. Central serializer
+## 16. Central serializer
 
 One serializer checks release identity; source/catalog ownership; original text/citation/page projections; classifications/provenance; source/build/assembly lineage; selection roles/seeds/retrieval records; context completeness/paths/targets; conflicts/reasons; warnings; deterministic ordering; public allowlists; and output/frame bounds.
 
 Disagreement fails closed.
 
-## 18. Release/runtime integrity
+## 17. Release/runtime integrity
 
 Evidence work opens only a validated immutable active release. Startup/release validation verifies all schema/artifact/rule versions needed by exact/lexical retrieval plus graph/context/conflict/serializer behavior. Rollback restores the matching catalog/index/relationship/context/conflict/lineage/configuration set atomically.
 
-## 19. Evaluation alignment
+## 18. Evaluation alignment
 
-Phase 2 evaluation follows `phase-2-release-gates.md` exactly.
+Phase 2 evaluation follows `docs/implementation/phase-2-release-gates.md` exactly.
 
 - retrieval Recall@K and classification/conflict candidate/precision families use the design's probabilistic Wilson gates;
 - required-context/path/status/order correctness is a zero-failure complete deterministic traversal conformance suite;
 - conflict position/source/lineage completeness and all-side runtime preservation is a zero-failure complete deterministic conflict conformance suite;
+- explicit `get_context` supporting/diagnostic traversal is covered by deterministic context-level/truncation conformance;
 - strict Evidence Package/interface behavior is deterministic conformance.
 
 Do not invent a separate held-out 100% context/all-side gate in place of Section 29.4.
 
-## 20. Required conformance fixtures
+## 19. Required conformance fixtures
 
-Include exact clause with/without expansion, lexical dependency/definition, exception+condition, table context, empty target, unresolved standard/critical cases, confirmed/unresolved conflicts, graph-conflict fixed point, required overflow, **no-match success with mandatory `evidence_insufficient`**, **`auto` fallback with mandatory `retrieval_capability_unavailable`**, filter/status preservation, Python/CLI/MCP equivalence, and raw source resource byte/MIME contract.
+Include exact clause with/without expansion, lexical dependency/definition, exception+condition, table context, empty target, unresolved standard/critical cases, confirmed/unresolved conflicts, graph-conflict fixed point, required overflow, **Python/MCP `get_context` at `required`, `supporting`, and `diagnostic` levels**, optional truncation after complete required closure, **absence of a CLI `get-context` command**, **no-match success with mandatory `evidence_insufficient`**, **`auto` fallback with mandatory `retrieval_capability_unavailable`**, filter/status preservation, Python/CLI/MCP equivalence for operations exposed by all three surfaces, Python/MCP equivalence for `get_context`, and raw source resource byte/MIME contract.
 
-## 21. Negative/security fixtures
+## 20. Negative/security fixtures
 
-Cover malformed IDs/overlimits/extra properties, forged sources, resource URI attacks, path leakage, invalid graph edges, fabricated context-target source fields, citation/page mismatch, missing conflict side, false precedence, output-budget overflow, cancellation/deadline late-success races, **no-match success missing `evidence_insufficient`**, and **auto fallback missing `retrieval_capability_unavailable`**.
+Cover malformed IDs/overlimits/extra properties, forged sources, resource URI attacks, path leakage, invalid graph edges, fabricated context-target source fields, citation/page mismatch, missing conflict side, false precedence, output-budget overflow, cancellation/deadline late-success races, **an invented CLI `get-context` command**, **no-match success missing `evidence_insufficient`**, and **auto fallback missing `retrieval_capability_unavailable`**.
 
-## 22. Implementation sequence
+## 21. Implementation sequence
 
 1. complete/validate graph/context/conflict release contracts;
 2. implement exact/lexical seed service;
 3. implement required graph/conflict fixed point;
-4. implement evidence/context-target/conflict projections;
-5. implement completeness/warning/error routing, including mandatory no-match and auto-fallback warnings;
-6. implement central serializer;
-7. expose typed Python service;
-8. project through CLI/MCP tools;
-9. implement each MCP resource according to its independent exact contract;
-10. run protocol/security conformance and current Section 29.4 gates;
-11. run activation/rollback validation.
+4. implement explicit supporting/diagnostic optional traversal for Python/MCP `get_context` after the required fixed point;
+5. implement evidence/context-target/conflict projections;
+6. implement completeness/warning/error routing, including mandatory no-match and auto-fallback warnings;
+7. implement central serializer;
+8. expose typed Python service;
+9. project the design-defined CLI `search` and `get-clause` commands through the shared service;
+10. project MCP evidence tools including `get_context` through the shared service;
+11. implement each MCP resource according to its independent exact contract;
+12. run protocol/security conformance and current Section 29.4 gates;
+13. run activation/rollback validation.
 
-## 23. Acceptance criteria
+## 22. Acceptance criteria
 
-Phase 2 evidence-service work is complete only when exact/lexical seeds are deterministic/edition-safe; every ordinary evidence seed enters complete required graph/conflict closure; central strict serialization passes; evidence tools meet Section 22; **every no-match search includes `evidence_insufficient`**, **every applicable `auto` capability fallback includes `retrieval_capability_unavailable`**; metadata/list/page remain safe; source/build/assembly lineage is correct; empty targets are not fabricated; all material sides are preserved; completeness/warnings/errors match design; required overflow yields no partial package; Python/CLI/MCP evidence semantics are equivalent; MCP resources obey their independent exact contracts (especially raw source text); current Section 29.4 gates and protocol/security/activation/rollback conformance pass; and no Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation is pulled into Phase 2.
+Phase 2 evidence-service work is complete only when:
+
+1. exact/lexical seeds are deterministic/edition-safe;
+2. every ordinary evidence seed enters complete required graph/conflict closure;
+3. Python/MCP `get_context` correctly supports explicit `required`, `supporting`, and `diagnostic` traversal after required closure;
+4. no CLI `get-context` command is invented outside Section 23.1;
+5. central strict serialization passes;
+6. evidence tools meet Section 22;
+7. every no-match search includes `evidence_insufficient`;
+8. every applicable `auto` capability fallback includes `retrieval_capability_unavailable`;
+9. metadata/list/page remain safe;
+10. source/build/assembly lineage is correct;
+11. empty targets are not fabricated;
+12. all material sides are preserved;
+13. completeness/warnings/errors match design;
+14. required overflow yields no partial package and optional overflow truncates only after complete required closure;
+15. Python/CLI/MCP semantics are equivalent for their overlapping operations, while Python/MCP `get_context` is equivalent across those two surfaces;
+16. MCP resources obey their independent exact contracts, especially raw source text;
+17. current Section 29.4 gates and protocol/security/activation/rollback conformance pass;
+18. no Phase 3 dense/RRF or Phase 4 reranking/automatic high-accuracy supporting-context implementation is pulled into Phase 2.
