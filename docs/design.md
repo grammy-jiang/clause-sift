@@ -1,10 +1,12 @@
 # ClauseSift Design Document
 
-**Document version:** 0.1  
-**Status:** Initial design baseline  
-**Project:** ClauseSift  
-**Repository:** `grammy-jiang/clause-sift`  
-**Primary implementation language:** Python  
+- **Document version:** 0.1
+- **Status:** Initial design baseline
+- **Project:** ClauseSift
+- **Repository:** `grammy-jiang/clause-sift`
+- **Primary implementation language:** Python
+- **Product-intent source:** [ClauseSift Design Brief](design-brief.md)
+- **Design rulebook:** [ClauseSift Design Principles](design-principles.md)
 
 ## 1. Executive summary
 
@@ -2025,7 +2027,19 @@ For “When may mechanical smoke exhaust be omitted?” the client performs this
 
 ---
 
-## 23. CLI design
+## 23. Python and CLI interfaces
+
+The public Python entry point is `clausesift.open(workspace)`, which returns a
+read-only client pinned to one verified active release and usable as a context
+manager. It exposes the six Section 22.1 tool names as methods with the same
+keyword parameters, defaults, validation, and success fields. Results use the
+central serializer; failures raise `ClauseSiftError` carrying only the shared
+`{code, phase, severity, message, details?}` object. `list_documents` accepts and
+returns the same authenticated, release-bound cursor. Cross-interface
+conformance tests require Python, CLI, and MCP to preserve identical normalized
+fields, ordering, error codes, pagination boundaries, and safe serialization.
+
+### 23.1 CLI design
 
 Initial command surface:
 
@@ -2041,7 +2055,10 @@ clausesift get-clause <document-id> <clause>
 clausesift mcp
 ```
 
-The CLI and MCP server must call the same runtime service layer rather than implementing separate retrieval logic.
+The Python facade, retrieval CLI commands, and MCP server must call the same
+runtime service layer rather than implementing separate retrieval logic. Build
+and release CLI commands call the offline compiler and are outside the
+read-only retrieval facade.
 
 `clausesift mcp` reserves stdout exclusively for MCP frames. Diagnostics, logs, progress intended for operators, and tracebacks go to stderr or the configured log sink; startup failure exits non-zero without writing non-protocol text to stdout.
 
@@ -2748,7 +2765,8 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 - clause lookup;
 - lexical retrieval;
 - deterministic citations;
-- basic CLI and MCP tools;
+- deterministic required Evidence Graph context and material-conflict closure;
+- basic Python, CLI, and MCP retrieval interfaces;
 - static review report;
 - immutable release;
 - candidate-release validation, atomic activation, and rollback tests.
@@ -2764,9 +2782,9 @@ Audit history has two explicitly bounded chains so an immutable release never cl
 ### Phase 4: High-accuracy retrieval
 
 - add cross-encoder reranking;
-- add deterministic Evidence Graph context traversal;
+- enable supporting-context expansion for high-accuracy retrieval;
 - improve tables and cross-references;
-- add typed warnings and refusal support.
+- expand typed warnings and refusal evaluation for high-accuracy retrieval.
 
 ### Phase 5: Version and product intelligence
 
@@ -2791,8 +2809,12 @@ The first usable MVP must:
 - perform exact clause lookup;
 - perform lexical search with metadata filters;
 - return original evidence text and deterministic citations;
-- retrieve relevant parent and adjacent context;
-- expose core functionality through CLI and MCP;
+- run deterministic required-context and material-conflict closure for parent
+  scope, applicability, dependencies, definitions, exceptions, table context,
+  and every material conflict side;
+- return explicit incomplete-required warnings or one blocking limit error
+  instead of silently omitting required context;
+- expose core functionality through Python, CLI, and MCP;
 - pass protocol compatibility, structured-output, typed-error, pagination, and cancellation tests;
 - generate static parser/chunk review reports;
 - build an immutable release;
