@@ -43,8 +43,8 @@ Therefore the following are never alternative spellings of page 1:
 - `001`;
 - `+1`;
 - `-1`;
-- ` 1`;
-- `1 `;
+- a leading-space form such as " 1";
+- a trailing-space form such as "1 ";
 - a percent-encoded sign or leading whitespace;
 - any Unicode digit sequence other than ASCII `0`-`9` in the canonical decimal grammar.
 
