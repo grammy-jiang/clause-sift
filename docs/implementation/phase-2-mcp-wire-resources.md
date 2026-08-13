@@ -3,82 +3,237 @@
 **Project:** ClauseSift  
 **Phase:** 2 — Exact Retrieval MVP  
 **Status:** Normative Phase 2 implementation-plan appendix  
-**Primary design authority:** `docs/design.md` Sections 22 and 31  
-**Companion protocol plans:** `docs/implementation/phase-2-mcp-protocol-conformance.md`, `docs/implementation/phase-2-mcp-admission-budgets.md`
+**Primary design authority:** `docs/design.md` Sections 19-22 and 31  
+**Current-design correction:** `docs/implementation/phase-2-current-design-correction.md`  
+**Evidence service:** `docs/implementation/phase-2-evidence-service.md`  
+**Protocol companions:** `phase-2-mcp-protocol-conformance.md`, `phase-2-mcp-admission-budgets.md`
 
-## 1. Purpose and Phase 2 surface
+## 1. Purpose and current Phase 2 surface
 
-Phase 2 advertises only MCP surfaces whose complete design contract can be satisfied without Phase 4 Evidence Graph runtime closure.
+Current `docs/design.md` assigns the ordinary context-complete exact/lexical evidence path to Phase 2. Therefore Phase 2 advertises the basic MCP evidence tools/resources it can now satisfy completely.
 
-The public Phase 2 MCP tool surface is:
-
-- `get_document_metadata`;
-- `list_documents`;
-- `get_page_reference`.
-
-The public Phase 2 MCP resource surface is:
-
-- `standards://document/{document_id}`;
-- `standards://page/{document_id}/{page_number}`;
-- `standards://release/current`.
-
-The following design resources/tools remain **unadvertised until Phase 4** because their success semantics require final Evidence Package/context behavior:
+The Phase 2 tool surface is:
 
 - `search_evidence`;
 - `get_clause`;
 - `get_context`;
-- `standards://clause/{document_id}/{clause_number}`;
-- `standards://source/{source_id}` when exposed as part of the final evidence-oriented MCP contract.
+- `get_document_metadata`;
+- `list_documents`;
+- `get_page_reference`.
 
-This appendix defines the exact MCP wire shape and resource URI/success behavior only for the Phase 2-advertised subset.
+The Phase 2 resource surface includes the current design-defined read-only release/document/page templates plus the clause/source evidence resources defined by Section 22 when implemented in the same context-complete evidence service.
+
+A Phase 2-only runtime does **not** claim Phase 3 dense/hybrid capability or Phase 4 reranker/supporting-context high-accuracy capability. An explicit unavailable later mode fails with `feature_unavailable` rather than silently degrading.
+
+The MCP transport never exposes a context-incomplete direct-retrieval substitute for `search_evidence` or `get_clause`.
 
 ## 2. Tool advertisement contract
 
-Every advertised Phase 2 tool declares all of the following:
+Every advertised tool declares:
 
-- stable tool name;
-- non-empty human-readable description;
-- strict JSON Schema input contract;
-- strict JSON Schema success-output contract;
-- read-only annotation consistent with actual behavior.
+- stable name;
+- non-empty description;
+- strict JSON Schema input;
+- strict success-output schema;
+- accurate read-only annotation;
+- `additionalProperties: false` on closed objects;
+- complete property descriptions including identifier domains, normalization, bounds, null/default semantics, filter combination, pagination, and mode/context-level behavior.
 
-Every input-schema property has a non-empty description that states, as applicable:
+The tool/resource list is stable for one process lifetime. No resource subscription/list-change notification is advertised by v0.1.
 
-- identifier domain;
-- units;
-- normalization;
-- null/default behavior;
-- filter-combination behavior;
-- inclusive/exclusive numeric bounds;
-- string/list bounds;
-- cursor semantics.
+## 3. Common request bounds
 
-All tool input and output objects use `additionalProperties: false` unless the design explicitly specifies a narrower nested extension point. Phase 2 must not advertise unconstrained generic success objects.
+Apply the current Section 22 input rules before retrieval or expensive work.
 
-## 3. Tool success wire representation
+At minimum:
 
-A successful Phase 2 tool call returns the strict tool-specific success object in MCP `structuredContent`.
+- query: trimmed 1-4096 scalars and at most 16,384 encoded UTF-8 bytes;
+- opaque `document_id`/`source_id`: 1-128 and `^[a-z0-9][a-z0-9._:-]{0,127}$`;
+- clause/document-code/edition/jurisdiction/discipline/status/type/mode/context-level values: 1-128 plus applicable closed enums;
+- filter arrays: at most 64 unique items each;
+- `search_evidence`: at most 256 total filter values;
+- result limit: 1-100;
+- cursor: at most 4096 plus authenticated release binding;
+- page number: positive 32-bit and not above manifested page count.
 
-The same already-validated public success object is serialized exactly once into JSON for the legacy text representation and emitted as exactly one text content block.
+Validate applicable limits both before and after field normalization.
 
-The legacy JSON text:
+Invalid input is rejected before model loading, traversal, page allocation, or catalog work beyond what validation requires.
 
-- is derived from the validated public object, not from a second formatting path;
-- parses to an object exactly equal to `structuredContent`;
-- cannot contain an extra field omitted by `structuredContent`;
-- cannot omit a field present in `structuredContent`;
-- uses the central outbound serializer and public field allowlist;
-- contains no absolute source path, workspace path, raw exception string, credential, or unallowlisted internal field.
+## 4. Common success wire representation
 
-Dual-revision tests compare parsed legacy text to `structuredContent` for exact equality on every Phase 2 success tool.
+A successful tool call returns its strict public success object in `structuredContent`.
 
-## 4. Phase 2 tool success objects
+The same already validated object is serialized once to JSON for exactly one legacy text content block.
 
-### 4.1 `get_document_metadata`
+Parsed legacy text must equal `structuredContent` exactly.
 
-Selection: exact opaque `document_id`; no active/latest edition substitution.
+Both representations use one central public serializer/allowlist and contain no absolute paths, workspace roots, credentials, raw exceptions, or unknown internal fields.
 
-Success object:
+## 5. Common tool error branch
+
+A well-formed call to a known tool that fails semantic/domain execution returns:
+
+- `isError: true`;
+- no `structuredContent`;
+- exactly one JSON text content block containing the strict shared error object.
+
+The strict error object is:
+
+```text
+{
+  code,
+  phase,
+  severity,
+  message,
+  details?
+}
+```
+
+Messages are code-owned; detail keys/types are per-code allowlisted. Raw exception strings, paths, credentials, query/source text, and arbitrary diagnostics are not emitted unless explicitly admitted by the design.
+
+Protocol errors remain protocol JSON-RPC errors; tool domain errors are not disguised as success objects with an embedded `error` property.
+
+## 6. `search_evidence`
+
+### 6.1 Selection semantics
+
+Validate the bounded query and exact filters.
+
+Values are ORed within each filter list; filter categories are ANDed. `status: null` removes the default active-only filter.
+
+Resolve `mode` only among installed + release-supported capabilities.
+
+In Phase 2 the successful ordinary path uses exact/identifier and lexical direct seeds. Every seed then runs Phase 2 required graph-and-material-conflict closure.
+
+Direct metadata filters constrain retrieval seeds, not required context/conflict attachments.
+
+### 6.2 Success object
+
+Return exactly:
+
+```text
+{
+  query,
+  retrieval_mode,
+  release,
+  context_completeness,
+  evidence,
+  context_targets,
+  conflicts,
+  warnings
+}
+```
+
+`evidence` contains ordered direct, expanded-context, and conflict-context source-backed items using the Section 21 closed schema.
+
+`context_targets` contains metadata-only accepted empty structural nodes.
+
+`conflicts` contains every material admitted conflict record applicable to the returned evidence subgraph.
+
+No match is a `complete` success with empty evidence/context-target/conflict arrays.
+
+### 6.3 Domain errors
+
+At minimum:
+
+- malformed/over-limit query or filters -> `identifier_invalid`;
+- explicit unsupported mode -> `feature_unavailable`;
+- required graph/conflict closure overflow -> `context_limit_exceeded`;
+- active/lazy release integrity failure -> `release_integrity_failed`.
+
+No partial Evidence Package is emitted after a required closure overflow.
+
+## 7. `get_clause`
+
+### 7.1 Selection
+
+Use exact opaque `document_id` plus normalized exact `clause_number`.
+
+No fuzzy clause match, latest-edition substitution, or same-number cross-edition fallback is allowed.
+
+Select the complete Section 14.1 exact-lookup source set as direct `retrieval_seed` items, then run required graph/conflict closure from every direct source.
+
+### 7.2 Success
+
+Return exactly the Section 22 clause success root:
+
+```text
+{
+  release,
+  context_completeness,
+  evidence,
+  context_targets,
+  conflicts,
+  warnings
+}
+```
+
+For a found clause, `evidence` is non-empty. Direct and attached roles remain distinguishable in assembly lineage.
+
+### 7.3 Errors
+
+- malformed input -> `identifier_invalid`;
+- unknown document/clause -> `resource_not_found`;
+- required closure overflow -> `context_limit_exceeded`.
+
+## 8. `get_context`
+
+### 8.1 Selection
+
+Use exact `source_id` and closed `context_level`:
+
+- `required`;
+- `supporting`;
+- `diagnostic`.
+
+Each level includes preceding levels. Relation-family booleans independently control explicit inspection families but never retroactively weaken required closure of another search/clause result.
+
+### 8.2 Success
+
+Return exactly the current root containing:
+
+```text
+{
+  release,
+  source_id,
+  context_completeness,
+  evidence,
+  context_targets,
+  context,
+  conflicts,
+  warnings
+}
+```
+
+`context` always contains required arrays:
+
+- `parents`;
+- `applicability`;
+- `dependencies`;
+- `definitions`;
+- `exceptions`;
+- `notes`;
+- `tables`;
+- `references`;
+- `versions`;
+- `adjacent`.
+
+Disabled/not-found families are empty arrays rather than omitted fields.
+
+Conflict closure preserves every material side reached through enabled families.
+
+### 8.3 Errors
+
+- malformed source/context-level input -> `identifier_invalid`;
+- unknown source -> `resource_not_found`;
+- required closure overflow -> `context_limit_exceeded`.
+
+## 9. `get_document_metadata`
+
+Selection: exact opaque `document_id`, with no latest/active substitution.
+
+Success:
 
 ```text
 {
@@ -87,18 +242,18 @@ Success object:
 }
 ```
 
-`document` is the safe manifest/catalog projection required by `docs/design.md`: exact vocabulary version, document type, normative status, lifecycle status, authority, jurisdictions/disciplines, source hash, review/admission state, and release identity, excluding internal source locators and inferred legal force.
+`document` is the safe exact manifest/catalog projection defined by the design and excludes internal source locators and inferred legal force.
 
-Domain errors:
+Errors:
 
-- malformed input → `identifier_invalid` tool error;
-- valid unknown `document_id` → `resource_not_found` tool error.
+- malformed input -> `identifier_invalid`;
+- unknown document -> `resource_not_found`.
 
-### 4.2 `list_documents`
+## 10. `list_documents`
 
-Selection: non-null filters are ANDed; exact normalized closed-enum/string values only; stable `(document_code, edition, document_id)` ordering; authenticated release-bound keyset cursor as defined by the Phase 2 plan.
+Selection uses exact normalized filters, stable current-design ordering, and authenticated release-bound keyset cursor.
 
-Success object:
+Success:
 
 ```text
 {
@@ -108,18 +263,18 @@ Success object:
 }
 ```
 
-Every `items` entry is the same safe document metadata summary used by the document projection contract. `next_cursor` is string or null.
+Every item uses the same safe document summary projection; cursor is string or null.
 
-Domain errors:
+Errors:
 
-- malformed filter/limit/cursor → `identifier_invalid`;
-- structurally valid cursor bound to another release → `resource_not_found`.
+- malformed filter/limit/cursor -> `identifier_invalid`;
+- valid cursor bound to another/unavailable release -> `resource_not_found`.
 
-### 4.3 `get_page_reference`
+## 11. `get_page_reference`
 
-Selection: exact opaque `document_id` + one-based integer page number within manifested page count.
+Selection: exact `document_id` + one-based page within manifested page count.
 
-Success object:
+Success:
 
 ```text
 {
@@ -132,363 +287,257 @@ Success object:
 }
 ```
 
-`page_uri` is the canonical authorized `standards://page/...` URI; `content_hash` is the source-document SHA-256 required by the full-PDF page-resource contract.
+`page_uri` is canonical authorized `standards://page/...`; `content_hash` is the verified source-document hash used by the page resource contract.
 
-Domain errors:
+Errors:
 
-- malformed/out-of-range input → `identifier_invalid`;
-- unknown document/unavailable page → `resource_not_found`.
+- malformed/out-of-range -> `identifier_invalid`;
+- unknown document/unavailable page -> `resource_not_found`.
 
-## 5. Tool execution error branch
+## 12. Evidence success-schema invariants
 
-A well-formed `tools/call` that reaches a known Phase 2 tool but fails semantic validation/execution returns the MCP tool-error branch:
+For `search_evidence`, `get_clause`, and `get_context`, all source-backed items use the single Section 21 serializer from `phase-2-evidence-service.md`.
 
-- `isError: true`;
-- **no `structuredContent` field**;
-- exactly one text content block;
-- text is exactly one JSON serialization of the strict shared error object:
+The MCP adapter must not:
 
-```text
-{
-  code,
-  phase,
-  severity,
-  message,
-  details?
-}
-```
+- omit required context/conflict items to reduce payload;
+- flatten metadata-only context targets into fabricated evidence;
+- drop typed warnings;
+- add ad-hoc classifier/traversal fields outside the closed schema;
+- expose internal paths or SQL IDs;
+- transform original source text into a generated summary.
 
-The central serializer validates the error object against a separate strict internal schema using:
+If a valid complete success would violate an output/frame budget, route the design-defined typed/protocol failure rather than emitting partial/oversized content.
 
-- `additionalProperties: false`;
-- code-owned message templates;
-- per-code allowlists for `details` keys and value types;
-- no raw exception strings;
-- no arbitrary caller-provided diagnostic messages;
-- no paths/credentials/query/source text in details unless the design explicitly allows that field for that diagnostic (none of the Phase 2 cases here authorize path/credential exposure).
+## 13. Dual-revision conformance
 
-A tool error is never represented by a success-schema object carrying an embedded `error` field.
-
-## 6. Protocol error vs tool error separation
-
-Phase 2 conformance distinguishes:
-
-- malformed JSON-RPC / unknown MCP method / invalid MCP request shape → protocol-owned JSON-RPC error;
-- unknown tool name or invalid `tools/call` protocol shape → protocol-owned route according to the supported MCP revision;
-- known well-formed Phase 2 tool semantic/domain failure → `isError: true` tool result;
-- malformed/non-canonical resource URI → protocol JSON-RPC `-32602` on both supported protocol paths;
-- canonical unknown resource → revision-specific resource-miss protocol route from `docs/design.md`, never a tool error or empty success;
-- page source-integrity failure → both-revision JSON-RPC `-32603` safe resource error, no contents.
-
-Tests assert each condition has exactly one surface.
-
-## 7. Dual-revision tool conformance
-
-The complete Phase 2 tool suite runs under both supported design protocol paths:
+Run the complete Phase 2 tool suite under both supported protocol paths defined by the design:
 
 - per-request `2026-07-28` path;
 - initialized-session `2025-11-25` path.
 
-For every Phase 2 tool and each revision test:
+For every advertised tool and revision prove:
 
-- advertised input schema is strict and descriptive;
-- success validates against the advertised success-output schema;
-- success has `structuredContent`;
-- legacy text parses to the exact same public object;
-- error has `isError: true`;
-- error has no `structuredContent`;
-- error text parses to the strict shared error object;
-- no third representation shape appears.
+- strict descriptive input schema;
+- strict success schema;
+- valid success `structuredContent`;
+- legacy text exact-object equality;
+- domain error `isError: true` with no structured content;
+- one strict error JSON text representation;
+- no revision-specific semantic drift.
 
-Revision-specific metadata such as result type/cache hints is emitted only where the design assigns it; common success/error semantics do not drift.
+Revision-specific metadata is emitted only where the detailed design assigns it.
 
-## 8. Canonical resource URI generation
+## 14. Canonical resource URI generation
 
-Phase 2 resource templates use RFC 6570 simple-string expansion over already normalized semantic values.
+Resource templates use RFC 6570 simple-string expansion over normalized semantic values.
 
 For every variable segment:
 
-1. encode the semantic string as UTF-8;
+1. UTF-8 encode the semantic string;
 2. leave only RFC 3986 unreserved bytes literal;
-3. percent-encode every other byte;
-4. use uppercase hexadecimal digits in each percent escape.
+3. percent-encode all others;
+4. use uppercase hex.
 
-A canonical resource emitted by ClauseSift is therefore unique at the byte level for the normalized semantic value.
+The runtime never concatenates client URI segments into filesystem paths.
 
-The runtime never constructs filesystem paths by concatenating a client resource URI segment.
+## 15. Canonical resource URI parsing
 
-## 9. Canonical resource URI parsing
+For a client resource read:
 
-For a client-supplied Phase 2 resource read, the router:
+1. validate exact scheme/route/segment count;
+2. strict-decode each variable exactly once;
+3. reject malformed `%` escapes and invalid UTF-8;
+4. re-encode canonically;
+5. require byte-for-byte equality with the supplied segment;
+6. apply field normalization/schema rules;
+7. only then perform parameterized catalog lookup.
 
-1. validates the exact route shape/scheme/segment count;
-2. decodes each variable segment **exactly once** using strict UTF-8;
-3. rejects malformed `%` escapes;
-4. rejects invalid UTF-8;
-5. re-encodes the decoded semantic segment using the canonical RFC 6570/RFC 3986 rule above;
-6. requires the re-encoded bytes to be byte-identical to the client-supplied segment;
-7. only after the canonicality check applies field normalization/schema rules;
-8. only then performs parameterized catalog lookup.
+No catalog lookup occurs after URI canonicality failure.
 
-No catalog lookup occurs for a malformed/non-canonical URI.
+Negative fixtures cover encoded separators, `%`, `?`, `#`, spaces, non-ASCII, lower-case escapes, malformed escapes, invalid UTF-8, overlong routes, and percent-looking literal identifiers without double decoding.
 
-## 10. Resource-URI negative fixtures
+## 16. Resource catalogue
 
-The Phase 2 suite covers at minimum:
+The process advertises only resources it fully implements. The catalogue is immutable for the process lifetime.
 
-- literal/encoded `/`;
-- `%`;
-- `?`;
-- `#`;
-- spaces;
-- non-ASCII UTF-8;
-- lower-case percent escapes;
-- malformed/incomplete escapes;
-- invalid UTF-8 byte sequences;
-- overlong/invalid route shapes;
-- a literal identifier that itself looks like percent-encoded text, proving there is no double decoding;
-- canonical value round-trip generation → parse → re-encode equality.
+Current categories include:
 
-Every malformed or non-canonical route returns JSON-RPC `-32602` on both supported protocol paths with no `contents` and no catalog lookup.
+- document metadata resource;
+- page resource;
+- current release resource;
+- clause evidence resource when defined by Section 22;
+- source evidence resource when defined by Section 22.
 
-## 11. Phase 2 resource catalogue capabilities
+Clause/source evidence resources must call/project the same context-complete Phase 2 evidence service; they cannot reintroduce the old direct-only semantics.
 
-The Phase 2 resource catalogue is immutable for one server process.
+## 17. Resource success cardinality
 
-Advertised resources are read-only. Phase 2 does not advertise:
+Every successful `resources/read` contains exactly one content item with:
 
-- resource subscription;
-- list-change notification;
-- mutation.
+- URI byte-identical to canonical requested URI;
+- exact assigned MIME type;
+- exact assigned text/blob content.
 
-The resource templates/static resource are exactly those listed in Section 1 of this appendix. Unimplemented Phase 4 resource templates must not be listed as a Phase 2 capability.
+Never return empty contents, multiple content items, a different URI, or a filesystem path on success.
 
-## 12. Resource success cardinality
+## 18. Document resource
 
-Every successful Phase 2 `resources/read` result contains **exactly one** content item.
+`standards://document/{document_id}` returns one JSON text resource.
 
-That content item:
+Its text is RFC 8785 UTF-8 serialization of the same safe `{release, document}` public object produced by `get_document_metadata`.
 
-- has `uri` exactly byte-for-byte equal to the canonical requested URI;
-- has the exact MIME type assigned below;
-- has content bytes/text exactly as assigned below.
+Tests assert byte equality after canonicalizing the tool public object.
 
-No Phase 2 handler returns:
+## 19. Release resource
 
-- empty `contents` on success;
-- two or more content items;
-- a canonical URI different from the requested URI;
-- a filesystem path in `uri`;
-- a wrapper object around content whose bytes are specified directly by the contract.
+`standards://release/current` snapshots the verified active release for process lifetime and returns one strict safe JSON summary/manifest digest.
 
-## 13. `standards://document/{document_id}` exact success
+Exclude source/workspace paths, credentials, mutable telemetry, and operator lifecycle secrets.
 
-MCP kind: read-only resource template.
+## 20. Page resource
 
-Success content item:
+`standards://page/{document_id}/{page_number}` returns one `application/pdf` blob resource according to the current design's complete verified source-PDF contract.
 
-- kind: `TextResourceContents`;
-- `mimeType: application/json`;
-- `uri`: exact canonical requested URI;
-- `text`: UTF-8 RFC 8785 serialization of **the same safe `{release, document}` success object produced by `get_document_metadata`** for the exact document.
+The requested page is navigation metadata; the content bytes are the design-defined verified PDF bytes, not a falsely labelled page derivative.
 
-The tool success object, after RFC 8785 canonicalization, and the resource `text` bytes must be byte-identical.
+All handle-bound containment/identity/stability/size/hash checks, page working-set reservation, frame limits, and cancellation terminal-state rules apply before success is committed.
 
-Tests compare:
+## 21. Clause/source evidence resources
 
-1. call `get_document_metadata(document_id)`;
-2. validate its tool success object;
-3. RFC 8785 serialize that public object;
-4. read canonical document resource;
-5. assert exactly one item, exact URI/MIME, and byte equality.
+Where Section 22 exposes clause/source resources, implement them as exact canonical projections of the shared evidence service.
 
-## 14. `standards://release/current` exact success
+### Clause resource
 
-MCP kind: read-only static resource.
+- canonical document ID + exact clause selector;
+- same direct exact-lookup set and required graph/conflict closure as `get_clause`;
+- strict context-complete evidence JSON;
+- no fuzzy/edition substitution.
 
-The process snapshots the verified active release at startup; the resource does not change during that process lifetime.
+### Source resource
 
-Success content item:
+- exact source ID in the active release;
+- source-backed item plus current-design context/evidence semantics defined for that resource;
+- exact original text/citation/lineage;
+- no hidden filesystem locator.
 
-- kind: `TextResourceContents`;
-- `mimeType: application/json`;
-- `uri: standards://release/current`;
-- `text`: UTF-8 RFC 8785 serialization of the strict safe immutable release summary and complete manifest digest required by `docs/design.md`.
+Resource/tool equality fixtures use one shared typed public object/serializer where the design defines the same logical representation.
 
-The safe release summary contains only public release metadata; it excludes source/workspace paths, credentials, operator lifecycle secrets, and mutable runtime telemetry.
+## 22. Unknown canonical resources
 
-Tests assert canonical byte stability for one process snapshot and checksum/manifest identity agreement.
+A well-formed canonical resource that does not resolve never returns empty success.
 
-## 15. `standards://page/{document_id}/{page_number}` exact success
+Use the design's revision-specific protocol route (including `-32602`/`-32002` where assigned), not a tool-style `resource_not_found` object.
 
-MCP kind: read-only resource template.
+Malformed/non-canonical URIs return the appropriate invalid-params protocol error before catalog lookup.
 
-Success content item:
+## 23. Page source-integrity failure
 
-- kind: `BlobResourceContents`;
-- `mimeType: application/pdf`;
-- `uri`: exact canonical requested URI;
-- `blob`: base64 encoding of the **complete bounded and handle-verified original PDF bytes**.
+For a known canonical page resource whose handle-bound verification fails:
 
-Decoding `blob` must reproduce the exact verified source bytes. `get_page_reference.content_hash` equals SHA-256 of those decoded PDF bytes (`documents.source_file_hash`), not a rendered-page hash.
+- return the design's safe internal/protocol error route (`-32603` where specified);
+- emit no contents or partial base64;
+- expose no path/raw exception;
+- preserve cancellation terminal-state precedence if cancellation already won.
 
-The requested page number is navigation metadata selecting the page URI; Phase 2 does not pretend the returned complete PDF is a rendered single-page derivative.
+## 24. Central serializer and allowlists
 
-All frame/working-set/integrity rules from the Phase 2 MCP protocol/admission appendices apply before success is committed.
+All tool/resource public objects pass one central serializer layer.
 
-## 16. Unknown canonical resource routes
+Each result type has an explicit field allowlist. Unknown internal fields fail closed.
 
-A well-formed canonical Phase 2 resource URI that does not resolve never returns an empty success.
-
-Use the design's revision-specific protocol errors:
-
-- `2026-07-28` per-request path: JSON-RPC `-32602` for canonical unknown `standards://` resource;
-- `2025-11-25` session path: JSON-RPC `-32002`.
-
-No tool `resource_not_found` object is substituted for these resource protocol routes.
-
-## 17. Page source-integrity failure
-
-For a known canonical page URI, failure of the handle-bound containment/identity/stability/size/hash check returns:
-
-- JSON-RPC `-32603` on both supported protocol paths;
-- code-owned message `Source integrity check failed`;
-- safe data exactly limited by the design, including:
-
-```json
-{
-  "code": "source_hash_mismatch",
-  "phase": "runtime",
-  "severity": "blocking"
-}
-```
-
-It returns:
-
-- no `contents`;
-- no partial base64;
-- no path;
-- no raw exception text.
-
-Cancellation that already won the request terminal state keeps its no-response outcome instead of emitting this late error.
-
-## 18. Central serializer and public allowlists
-
-All Phase 2 tool/resource public objects pass through one central serializer layer.
-
-For each result type it has an explicit public field allowlist. Unknown internal fields cause fail-closed serialization rather than accidental exposure.
-
-Security tests inject sentinels representing:
+Security tests inject sentinels for:
 
 - absolute path;
 - workspace root;
 - credential;
-- raw exception text;
-- arbitrary internal diagnostic message;
+- raw exception;
+- arbitrary internal diagnostic;
 - extra unknown property.
 
-The sentinel must not appear in:
+No sentinel may reach tool success/error, resource JSON/blob metadata, or logs where forbidden.
 
-- tool `structuredContent`;
-- tool legacy text;
-- tool error text;
-- document/release resource JSON;
-- page-resource error data;
-- configured logs where the design forbids it.
+## 25. Cross-surface equality tests
 
-## 19. Cross-surface equality tests
+Required equality relationships include:
 
-Phase 2 must prove equality relationships where the design intentionally exposes the same logical data through different MCP surfaces.
+- tool `structuredContent` == parsed legacy JSON for every tool;
+- document metadata tool canonical bytes == document resource text;
+- list items use the same safe document summary projection;
+- page-reference URI == canonical page resource URI;
+- page-reference content hash == verified source bytes hash returned by page resource contract;
+- release resource digest == active verified release manifest digest;
+- get-clause/associated clause resource use the same exact evidence service result where schemas are defined as equivalent;
+- get-context/search/source-resource paths cannot disagree about the same source's immutable source/build lineage.
 
-Required fixtures include:
+Do not implement equality by maintaining separate formatters.
 
-- `get_document_metadata` public object == parsed legacy text;
-- RFC 8785 `get_document_metadata` object bytes == document resource `text` bytes;
-- `list_documents.items[*]` uses the same safe document summary projection/version;
-- `get_page_reference.page_uri` == canonical URI read by the page resource;
-- `get_page_reference.content_hash` == SHA-256 of decoded page-resource PDF blob;
-- `standards://release/current` digest == active verified release manifest digest.
+## 26. Protocol/admission inheritance
 
-No equality fixture is implemented by duplicating independently maintained formatters; all project from shared typed public objects.
+This wire contract composes with existing Phase 2 MCP protocol/admission appendices without relaxing them, including:
 
-## 20. Protocol, input, output, and admission inheritance
-
-This wire contract composes with, and does not duplicate/relax, the other Phase 2 MCP appendices:
-
-- exact 1,048,576-byte inbound complete-frame limit;
-- exact 65,536-byte RFC 8785 canonical arguments budget;
-- exact 1,048,576-byte non-page complete-output limit;
-- exact 33,554,432-byte page complete-output limit;
+- 1,048,576-byte inbound complete-frame limit;
+- 65,536-byte RFC 8785 canonical argument budget;
+- 1,048,576-byte non-page complete-output limit;
+- 33,554,432-byte page complete-output limit;
 - 67,108,864-byte process page working-set budget;
-- `max_in_flight_requests` in 1..1024;
-- atomic terminal state for success/error/cancel/deadline;
+- `max_in_flight_requests` 1..1024;
+- atomic success/error/cancel/deadline terminal state;
 - cancellation no-response semantics;
-- protocol control liveness under saturation;
-- redaction and stdout framing rules.
+- protocol-control liveness under saturation;
+- stdout framing and redaction rules.
 
-A correct semantic success that violates a framing/admission bound is not emitted as an oversized/partial success.
+Required graph/conflict traversal must fit inside these same request/output/lifecycle contracts.
 
-## 21. Tests
+## 27. Conformance tests
 
-### 21.1 Tool advertisement/wire tests
+### Tool tests
 
-For each of the three Phase 2 tools and both revisions:
+For all six tools under both revisions:
 
-- descriptions non-empty;
-- all input-property descriptions non-empty;
-- `additionalProperties: false` where required;
-- read-only annotations accurate;
-- valid success matches advertised schema;
-- `structuredContent` exists;
-- one legacy text block parses to exactly equal object;
-- representative domain errors set `isError: true` and omit `structuredContent`;
-- error text matches strict error schema.
+- advertisement and strict schemas;
+- exact success/error branch shape;
+- legacy/structured equality;
+- boundary/one-over input tests;
+- no unknown output properties;
+- correct mode/capability behavior;
+- no-match search success;
+- required context/conflict closure;
+- context-limit no-partial failure.
 
-### 21.2 URI tests
+### Evidence semantics tests
 
-For document and page templates:
+- exact clause plus required context;
+- lexical search plus applicability/exception/table context;
+- confirmed/unresolved conflict all sides;
+- empty context target;
+- unresolved required warning/completeness;
+- status boundary preservation;
+- source/citation/lineage equality across Python/CLI/MCP.
 
-- canonical generation;
-- canonical parse/re-encode;
-- malformed escape;
-- lower-case escape;
-- invalid UTF-8;
-- reserved characters;
-- literal percent-looking identifier;
-- no double decoding;
-- no catalog lookup before canonicality success.
+### Resource tests
 
-### 21.3 Resource success tests
+- canonical URI generation/parse;
+- exactly one success content;
+- tool/resource equality where defined;
+- unknown canonical route errors;
+- page integrity failure;
+- cancellation and budget races;
+- clause/source resource context completeness.
 
-- document: exactly one JSON text item, exact URI/MIME, bytes equal canonical metadata tool object;
-- release: exactly one JSON text item, exact URI/MIME, canonical safe summary + manifest digest;
-- page: exactly one PDF blob item, exact URI/MIME, decoded bytes equal verified original source;
-- no empty or multi-item success.
+## 28. Acceptance criteria
 
-### 21.4 Error-route tests
+Phase 2 MCP wire/resource implementation is complete only when:
 
-- malformed URI: both revisions `-32602`, no contents/catalog work;
-- canonical unknown resource: revision-specific `-32602`/`-32002`;
-- page integrity failure: both revisions `-32603`, exact safe message/data, no contents;
-- cancellation-first suppresses later resource success/error;
-- saturation routes remain protocol admission errors rather than malformed tool errors.
-
-## 22. Acceptance criteria
-
-Phase 2 MCP wire/resource work is not complete unless:
-
-1. every advertised tool has exact description/input/output/read-only metadata;
-2. every tool success uses validated `structuredContent` plus exactly equivalent JSON legacy text;
-3. every tool execution error uses `isError: true`, no `structuredContent`, and the strict shared error JSON text;
-4. both supported MCP revision paths pass success/error conformance for every Phase 2 tool;
-5. advertised resource variables use canonical RFC 6570/RFC 3986 uppercase percent encoding;
-6. resource parsing decodes exactly once, strict-UTF8 re-encodes, and rejects non-canonical bytes before catalog lookup;
-7. malformed/non-canonical resources use both-revision `-32602`;
-8. each resource success contains exactly one content item with exact requested URI;
-9. document resource bytes equal RFC 8785 metadata-tool object bytes;
-10. release resource is canonical safe release summary + manifest digest;
-11. page resource decodes to exact verified original PDF bytes with matching tool content hash;
-12. canonical misses and source-integrity failures use the exact protocol routes and never empty/partial contents;
-13. central serializers/allowlists prevent path, credential, exception, and unknown-field leakage.
-
-These requirements remain strictly Phase 2 because they complete the wire behavior of MCP surfaces Phase 2 itself advertises, while final evidence-oriented tools/resources remain deferred to Phase 4.
+1. all six current Phase 2 tools are advertised only when their complete current-design semantics are implemented;
+2. ordinary search/clause/context success is context/conflict complete according to the shared evidence service;
+3. explicit later unsupported capabilities fail visibly rather than silently degrading;
+4. all tool success/error schemas are strict and dual-revision conformant;
+5. legacy text and structured success are exactly equal;
+6. resource URI handling is canonical and safe;
+7. document/page/release plus current clause/source resources obey exact success/error contracts;
+8. context/conflict evidence cannot be dropped for payload convenience;
+9. public allowlists prevent path/credential/internal leakage;
+10. protocol/admission/cancellation/frame budgets apply to the new evidence operations;
+11. cross-interface/resource equality tests pass;
+12. no Phase 3 dense/RRF or Phase 4 reranking/supporting-context behavior is pulled into this Phase 2 corrective scope.
