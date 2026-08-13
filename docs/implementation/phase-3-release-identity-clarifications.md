@@ -84,9 +84,9 @@ The existing design safe-loading policy remains authoritative:
 
 ### 3.2 Runtime recheck
 
-Before invoking the query-model loader, runtime rechecks every file the loader may open against the manifest size/hash table.
+Before invoking the query-model loader, the runtime rechecks every file the loader may open against the manifest size/hash table.
 
-A missing, extra, reordered where order is meaningful, size-mismatched, hash-mismatched, unsupported-format, or loader-version-incompatible asset fails before deserialization and follows the existing release-integrity/quarantine contract.
+A missing, extra, reordered asset where order is meaningful, size-mismatched, hash-mismatched, unsupported-format, or loader-version-incompatible asset fails before deserialization and follows the existing release-integrity/quarantine contract.
 
 This ensures the chunk embeddings built offline and the current-query embedding produced at runtime always use the exact same bound model asset identity.
 
@@ -128,5 +128,5 @@ These requirements are blocking Phase 3 acceptance criteria:
 1. same complete build identity produces byte-identical `embeddings.f16.npy` bytes and SHA-256;
 2. numerical tolerance is used only for numerical invariants, never as a substitute for release byte reproducibility;
 3. local query-model format, loader identity, tokenizer/weight assets, sizes, hashes, and complete ordered aggregate digest are bound into the release/build identity;
-4. runtime rechecks the complete model asset set before loading;
+4. the runtime rechecks the complete model asset set before loading;
 5. embedding/vector cache keys inherit the full authoritative `docs/design.md` Section 25 dependency contract.
