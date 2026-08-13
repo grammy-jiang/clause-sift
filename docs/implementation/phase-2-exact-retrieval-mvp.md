@@ -9,329 +9,185 @@
 
 ## 1. Objective
 
-Phase 2 builds the first complete ordinary ClauseSift evidence runtime.
+Phase 2 builds the first complete ordinary ClauseSift evidence runtime. Candidate selection remains deterministic exact/identifier + lexical retrieval, while every successful ordinary evidence result already satisfies current-design required context, material-conflict, lineage, warning, and Evidence Package semantics.
 
-Candidate selection remains deterministic exact/identifier + lexical retrieval. But every successful ordinary evidence result already satisfies current-design required context, material-conflict, lineage, warning, and Evidence Package semantics.
+Phase 2 delivers package/workspace/release infrastructure; approved manifests/source verification; parser routing and canonical Evidence Graph/catalog; evidence vocabulary/classification/page provenance; standards-aware chunks/exact lookup sets; stable relationship occurrence/edge identities; lexical indexing; exact/lexical seed retrieval; deterministic citations/lineage; required graph closure; material-conflict fixed-point closure; strict ordinary Evidence Package serialization; shared Python/CLI/MCP evidence behavior; current Section 22 tools/resources; current Section 29.4 quality gates; and immutable release validation/activation/rollback.
 
-Phase 2 delivers:
+Phase 2 does not implement Phase 3 embeddings/vector/RRF or Phase 4 cross-encoder reranking/automatic high-accuracy supporting-context expansion.
 
-- package/workspace/release infrastructure;
-- approved manifests/source verification;
-- parser routing and canonical Evidence Graph/catalog;
-- evidence vocabulary/classification/page provenance;
-- standards-aware chunks and exact lookup sets;
-- stable relationship occurrence/edge identities;
-- lexical index and exact/lexical direct seed retrieval;
-- deterministic citations and immutable source/build lineage;
-- deterministic required Evidence Graph closure;
-- deterministic material-conflict fixed-point closure;
-- strict ordinary Evidence Package serialization;
-- one shared Python/CLI/MCP evidence service;
-- current Section 22 tools/resources;
-- current Section 29.4 Phase 2 quality gates;
-- immutable release validation/activation/rollback.
+## 2. Canonical Phase 2 plan set
 
-Phase 2 does not implement Phase 3 embeddings/vector/RRF or Phase 4 cross-encoder reranking/supporting-context high-accuracy enhancements.
+Detailed appendices include:
 
-## 2. Canonical plan set
+- `docs/implementation/phase-2-required-context-closure.md`;
+- `docs/implementation/phase-2-material-conflict-closure.md`;
+- `docs/implementation/phase-2-evidence-service.md`;
+- `docs/implementation/phase-2-release-gates.md`;
+- `docs/implementation/phase-2-held-out-retry-policy.md`;
+- `docs/implementation/phase-2-lineage-release-contract.md`;
+- `docs/implementation/phase-2-mcp-wire-resources.md`;
+- `docs/implementation/phase-2-mcp-protocol-conformance.md`;
+- `docs/implementation/phase-2-mcp-admission-budgets.md`;
+- `docs/implementation/phase-2-release-lifecycle-guardrails.md`;
+- `docs/implementation/phase-2-canonical-id-migration.md`;
+- `docs/implementation/phase-2-contract-clarifications.md`;
+- `docs/implementation/phase-2-current-design-correction.md`.
 
-Detailed Phase 2 appendices include:
+Current `docs/design.md` is highest authority. Current corrective appendices supersede older Phase 2 statements that deferred ordinary required context/conflict/evidence behavior to Phase 4. Protocol/admission appendices remain authority for transport/budget/cancellation mechanics; their older surface lists are not current phase-scope authority.
 
-- `phase-2-required-context-closure.md`;
-- `phase-2-material-conflict-closure.md`;
-- `phase-2-evidence-service.md`;
-- `phase-2-release-gates.md`;
-- `phase-2-held-out-retry-policy.md`;
-- `phase-2-lineage-release-contract.md`;
-- `phase-2-mcp-wire-resources.md`;
-- `phase-2-mcp-protocol-conformance.md`;
-- `phase-2-mcp-admission-budgets.md`;
-- `phase-2-release-lifecycle-guardrails.md`;
-- `phase-2-canonical-id-migration.md`;
-- `phase-2-contract-clarifications.md`;
-- `phase-2-current-design-correction.md`.
+## 3. Phase boundary
 
-Current `docs/design.md` is highest authority. The current corrective appendices supersede older Phase 2 statements that deferred ordinary required context/conflict/evidence behavior to Phase 4.
-
-The protocol/admission appendices remain authority for transport/budget/cancellation rules; older tool/resource-scope statements in them are not current phase-scope authority.
-
-## 3. In scope
+### In scope
 
 Phase 2 implements and validates:
 
-- distribution/package/workspace/dependency profiles;
-- manifest schema, safe load, approval, source hash/size, relation entries, change detection;
+- package/workspace/dependency profiles;
+- manifest schema/safe load/approval/source verification/change detection;
 - selected Phase 1 parser routes/comparison/OCR policy;
-- canonical nodes/hierarchy/sequence and evidence vocabulary/classification provenance;
-- node page spans and optional validated boxes;
-- deterministic chunks/memberships/source IDs/exact lookup sets;
-- semantic cross-reference occurrence extraction/resolution and canonical edge IDs;
+- canonical nodes/hierarchy/sequence, evidence vocabulary/classification provenance;
+- page provenance and deterministic chunks/source identities/exact lookup sets;
+- semantic cross-reference occurrences and canonical navigable edge identities;
 - SQLite Evidence Graph/catalog/conflict/lineage/release records;
-- lexical engine benchmark/selection/index;
-- exact/lexical direct seed service and exact metadata filters;
+- lexical engine selection/index plus exact/lexical direct seed retrieval and metadata filtering;
 - deterministic citations;
 - required graph traversal/materialization/bounds;
-- material-conflict build records/source covers/runtime fixed point;
+- material-conflict build records/canonical position covers/runtime fixed point;
 - strict Evidence Package/context-target/conflict/warning serialization;
-- Python evidence API;
-- context-complete CLI evidence commands;
-- current six-tool MCP surface and design resources;
+- typed Python evidence API;
+- CLI `search` and `get-clause` through the shared evidence service;
+- MCP `search_evidence`, `get_clause`, `get_context`, metadata/list/page tools, and current design resources;
+- **explicit Python/MCP `get_context(required|supporting|diagnostic)` traversal, including optional truncation after complete required closure**;
 - immutable release/cache/lineage/activation/rollback;
-- current Phase 2 deterministic/probabilistic quality gates;
+- current deterministic/probabilistic quality gates;
 - protocol/admission/cancellation/security/failure-injection tests.
 
-## 4. Out of scope
+### Out of scope
 
-Phase 2 does not implement:
+Phase 2 does not implement chunk embeddings/vector search; embedding-model selection/query embedding; lexical+dense RRF/hybrid seed retrieval; cross-encoder reranking; automatic supporting-context expansion of ordinary `high_accuracy` search; Phase 4 high-accuracy table/cross-reference improvements beyond ordinary required correctness; Phase 4 expanded high-accuracy warning/refusal evaluation; ANN solely for convention; model-generated authoritative graph/conflict facts; or engineering/legal conclusions absent from approved sources/metadata/rules.
 
-- chunk embeddings or vector search;
-- embedding-model selection/query embedding;
-- lexical+dense RRF or hybrid seed retrieval;
-- cross-encoder reranking;
-- Phase 4 supporting-context expansion for high-accuracy search;
-- Phase 4 high-accuracy table/cross-reference improvements beyond ordinary required correctness;
-- Phase 4 expanded high-accuracy warning/refusal evaluation;
-- ANN solely because it is conventional;
-- model-generated authoritative graph/conflict facts;
-- engineering/legal conclusions absent from approved sources/metadata/rules.
-
-## 5. Governing invariants
+## 4. Governing invariants
 
 1. Original source bytes and approved manifest facts remain authoritative.
-2. Document/edition/node/chunk/source IDs are canonical and never substituted by text similarity.
-3. Exact clause lookup never chooses another edition or fuzzy clause.
-4. Ranking selects seeds only; it cannot erase required context/conflict sides.
+2. Canonical document/edition/node/chunk/source identities are never replaced by similarity.
+3. Exact clause lookup never substitutes another edition or fuzzy clause.
+4. Ranking selects direct seeds only; it cannot erase required context/conflict sides.
 5. Only release-validated typed relationships are navigable.
-6. Required closure follows a closed versioned rule set and exact deterministic queue/order/bounds.
-7. Material conflicts are n-ary derived records, not a shortcut graph edge.
-8. No score/recency/authority/stricter-looking text selects conflict precedence without an approved encoded rule.
-9. Required graph + material conflict closure reaches a deterministic least fixed point.
+6. Required closure follows the current closed rule set and deterministic queue/path/bound semantics.
+7. Material conflicts are n-ary derived release records, not a shortcut graph edge.
+8. No score/recency/authority/stricter-looking text creates conflict precedence without an approved rule.
+9. Required graph + conflict closure reaches a deterministic least fixed point.
 10. Required evidence is never silently truncated.
-11. Empty structural targets are metadata-only, never fabricated source evidence.
-12. Immutable `lineage.json` remains query-independent; request assembly lineage is runtime-only.
+11. Empty structural targets remain metadata-only.
+12. Immutable `lineage.json` is query-independent; assembly lineage is runtime-only.
 13. Evidence/warning/conflict/lineage schemas are closed.
-14. Python, CLI, and MCP evidence tools use one service.
-15. MCP resources preserve their independent canonical payload contracts; notably the source resource is raw `original_text`, not an Evidence Package wrapper.
-16. A failed candidate never changes the active release.
-17. Probabilistic held-out evidence is a gate, not an optimizer; deterministic conformance suites remain complete executable contracts.
+14. Python/CLI/MCP overlapping evidence operations use one service.
+15. **Python/MCP own `get_context`; current CLI has no `get-context` command.**
+16. MCP resources preserve independent Section 22 payload contracts; source resource is raw `original_text`, not an Evidence Package wrapper.
+17. A failed candidate never changes the active release.
+18. Probabilistic held-out evidence is a gate, not an optimizer; deterministic conformance suites remain complete executable contracts.
 
-## 6. Implementation architecture
+## 5. Build work packages
 
-```text
-approved manifests + exact source bytes
-  -> parser routing/comparison/OCR
-  -> canonical Evidence Graph + page provenance
-  -> chunks/sources + relationships
-  -> SQLite catalog
-  -> lexical index
-  -> required context + conflict build artifacts
-  -> immutable lineage/release artifacts
+### A — Package/workspace/source governance
 
-runtime request
-  -> strict validation
-  -> exact/lexical direct seeds
-  -> required graph closure
-  -> material conflict closure
-  -> least fixed point
-  -> strict Evidence Package serializer
-  -> Python / CLI / MCP evidence tools
-```
+Implement standard package/import/CLI names, base-runtime vs build/OCR dependency separation, idempotent safe workspace initialization, closed manifest schema, explicit approval artifacts, raw-vs-semantic manifest hashes, exact source hash/size/page validation, relations, and build-time revalidation.
 
-Resources such as raw source/page/document/current-release follow their own Section 22 resource contract rather than being forced into an Evidence Package shape.
+### B — Parser/canonical model/page provenance
 
-## 7. Work packages
+Bind selected Phase 1 parser/comparator/OCR routes. Build canonical node tree, stable IDs, vocabulary/classifications/provenance, page spans/boxes, standards-aware chunks, source memberships, and exact clause lookup sets. Parser disagreement follows comparison policy; field-level source-fact merging is forbidden.
 
-### A — Package/workspace/dependencies
+### C — Relationships/catalog/lexical retrieval
 
-Implement the standard package/import/CLI names, build/runtime dependency separation, idempotent workspace initialization, and path containment/symlink/reparse/regular-file safety. Base runtime must not import heavy parser/OCR build-only packages.
+Compile structural/semantic occurrence records, unique origin-authorized navigable edges, stable occurrence/edge IDs, and unresolved tier policy. Persist the logical Evidence Graph relationally in `knowledge.sqlite`. Select/freeze lexical behavior on non-decisive data and build immutable index artifacts.
 
-### B — Manifest/source governance
+### D — Citations/lineage/release identities
 
-Implement closed safe manifest schema, exact field bounds/enums, raw-vs-semantic manifest hashes, explicit approval artifacts, source hash/size/page verification, and build-time revalidation. Manifest-owned identity/status/applicability facts cannot be changed by parser/ranker/model output.
+Build deterministic citations and canonical query-independent `lineage.json`; bind lexical/relationship/context/conflict artifacts/configuration into current Section 25 cache/release identity; independently validate catalog/artifact/lineage consistency.
 
-### C — Parser/canonical model
+### E — Required context
 
-Bind selected Phase 1 canonical/comparator/OCR routes. Critical documents satisfy comparison policy. Build canonical node tree, stable IDs, evidence vocabulary/classifications, and complete provenance. No parser field-level merge silently creates source facts.
+Implement `phase-2-required-context-closure.md`: closed required rules, deterministic priority/path-state/cycle handling, source/context-target materialization, required graph/conflict fixed point, current numeric bounds, no-partial required overflow, and deterministic traversal/negative gates.
 
-### D — Page provenance/chunks
+After complete required closure, **Python/MCP `get_context` may explicitly continue to supporting/diagnostic traversal in Phase 2**. Automatic supporting expansion of ordinary high-accuracy search remains Phase 4.
 
-Persist deterministic node-page intervals/optional boxes; create standards-aware chunks/memberships/source IDs and exact Section 14.1 clause lookup sets. IDs/order are deterministic and independent of SQLite physical order.
+### F — Material conflicts
 
-### E — Relationships/Evidence Graph
+Implement `phase-2-material-conflict-closure.md`: conflict/position identities, required-context comparison projection, deterministic/review decision authority, canonical position covers, tier admission, runtime all-side fixed point, optional handoff for explicit Python/MCP `get_context`, strict conflict serialization, and Section 29.4 conflict gates.
 
-Compile structural `contains`/`precedes` and semantic `references`, `depends_on`, `exception_to`, `defines`, `supersedes`, `amends`, `applies_subject_to` occurrences. Only uniquely resolved origin-authorized semantic occurrences become navigable edges. Unresolved rows remain non-navigable and follow tier policy.
+### G — Evidence service and interfaces
 
-### F — Catalog and lexical retrieval
+Implement `phase-2-evidence-service.md`: one service for direct seeds -> required fixed point -> optional traversal when explicitly requested -> central strict serializer -> typed public result.
 
-Persist/independently validate documents/nodes/chunks/sources/memberships/pages/relationships/conflicts/lineage references. Select/freeze a lexical engine on non-decisive data, build immutable index artifacts, and implement deterministic exact/lexical seed ordering/filter behavior.
+Interface ownership is exact:
 
-### G — Citations and lineage
+- Python: search, exact clause retrieval, context inspection;
+- CLI Section 23.1: `clausesift search` and `clausesift get-clause` for evidence retrieval; **no CLI `get-context`**;
+- MCP: `search_evidence`, `get_clause`, `get_context` plus metadata/list/page tools;
+- resources: exact independent Section 22 resource contracts, including raw source text.
 
-Build deterministic source citations and canonical query-independent `lineage.json`. Runtime adds request-scoped exact/lexical retrieval/context/conflict assembly lineage through the current closed schema only.
+## 6. Runtime bounds and failure semantics
 
-### H — Required context
+Enforce current Section 19/22 bounds: structural depth 64; required semantic depth 8/seed; supporting depth 1; diagnostic depth 2; 128 expanded objects; 32 paths/object; 1,024 accepted steps; 64 conflicts/request; 16 positions/conflict; 256 total positions; 1,024 conflict spans; 1,024 conflict reasons; and current MCP frame/admission budgets.
 
-Implement `phase-2-required-context-closure.md`: closed required rules, exact queue order/path-state dedup/cycle handling, source/materialization/context-target rules, current numeric bounds, no-partial required overflow, deterministic graph/conflict composition, and complete deterministic traversal/negative conformance.
+Required overflow -> `context_limit_exceeded` with no partial Evidence Package. Explicit optional Python/MCP `get_context` overflow stops before the first over-bound optional candidate, preserves complete required closure, sets `truncated_optional`, and emits the permitted warning.
 
-### I — Material conflict
+No-match search remains complete empty success with mandatory `evidence_insufficient`. Successful `auto` fallback caused by unavailable later dense/reranker capability includes `retrieval_capability_unavailable`.
 
-Implement `phase-2-material-conflict-closure.md`: content-addressed conflict/position IDs, required-context comparison projection, deterministic/human-reviewed decision authority, canonical position source covers, tier admission, runtime all-side closure/fixed point, conflict serialization, probabilistic conflict candidate/precision gates, and deterministic all-side/precedence conformance.
+## 7. Quality gates
 
-### J — Evidence service
+`docs/implementation/phase-2-release-gates.md` maps Section 29.4 exactly.
 
-Implement `phase-2-evidence-service.md`: one service for direct seeds -> required graph/conflict fixed point -> central strict serializer -> typed Python results/errors.
+Deterministic complete-suite gates cover exact lookup, citations, unsupported conclusions, required traversal/path/status/order, prohibited traversal, vocabulary/schema/provenance, classification/source-authority negatives, conflict all-side/order/precedence, conflict negatives, Evidence Package/interface/resource/protocol conformance, **Python/MCP context-level semantics**, and **absence of CLI `get-context`**.
 
-### K — CLI/MCP
+Probabilistic gates include Recall@20 >=98% Wilson LB (>=150 applicable), Top-5 >=95% (>=60), three classification >=98% gates, conflict-candidate recall >=95%, and applicable confirmed/unresolved/explained precision >=98% families with current sample/stratification/reviewer rules.
 
-CLI search/get-clause/get-context use the same evidence service. MCP implements the current six evidence/metadata tools and exact Section 22 resources. The source resource remains raw validated `original_text` with `text/plain;charset=utf-8`. Protocol/admission companions apply their transport rules to the complete current surface.
+Do not invent a separate statistical held-out 100% context/all-side gate; those correctness obligations are current deterministic complete-suite gates.
 
-### L — Release lifecycle
+## 8. Held-out/release lifecycle
 
-Bind every behavior-bearing Phase 2 artifact/configuration to Section 25 dependency/release identity; run independent release/startup validation; assemble/checksum/reopen only after gates; atomically activate; rollback restores the matching catalog/index/graph/context/conflict/lineage/configuration set.
+Probabilistic decisive evidence follows `phase-2-held-out-retry-policy.md`: preregistration, behavior-bearing candidate identity, one decisive unseen use, reproduction-only replay, finite campaigns, and genuinely fresh later evidence. Deterministic conformance suites remain versioned executable contracts rerun in full after implementation changes.
 
-## 8. Exact runtime context bounds
+Candidate release assembly occurs only after all required artifacts/reports/gates pass. Reopen/checksum/startup validation is independent. Activation is atomic; rollback restores the matching catalog/index/graph/context/conflict/lineage/configuration set.
 
-Phase 2 enforces the current values:
-
-- structural depth 64;
-- required semantic depth 8 per seed;
-- supporting depth 1;
-- diagnostic depth 2;
-- 128 expanded objects/request excluding direct seeds;
-- 32 paths/context object;
-- 1,024 accepted path steps;
-- 64 conflicts/request;
-- 16 positions/conflict;
-- 256 total positions;
-- 1,024 conflict position spans;
-- 1,024 conflict inclusion reasons;
-- current Section 22/MCP byte/frame/admission bounds.
-
-Required overflow returns `context_limit_exceeded` with no partial Evidence Package.
-
-## 9. Quality gates
-
-Phase 2 follows `phase-2-release-gates.md`, which maps Section 29.4 exactly.
-
-### Deterministic zero-failure/zero-occurrence gates
-
-- exact clause lookup complete deterministic suite;
-- document/edition/clause/page citation suite;
-- unsupported deterministic conclusions golden set;
-- required context/lineage paths/source status/order traversal suite;
-- prohibited/unresolved/guessed/wrong-edition traversal negative suite;
-- vocabulary/schema/provenance/round-trip/version/extension suite;
-- classification/source-authority negative suite;
-- conflict position/source/lineage/all-side/order/precedence deterministic suite;
-- conflict explanation/promotion/false-winner negative suite;
-- strict Evidence Package/interface/protocol conformance as applicable.
-
-### Probabilistic Wilson gates
-
-- Recall@20 LB >=98%, >=150 applicable cases;
-- Top-5 LB >=95%, >=60;
-- node-type LB >=98%, >=150;
-- normative-status LB >=98%, >=150;
-- source-modality LB >=98%, >=150;
-- conflict-candidate recall LB >=95%, >=60;
-- confirmed/unresolved conflict precision LB >=98% for each applicable state family, >=150 each;
-- explained-difference precision LB >=98% for each applicable explanation-code family, >=150 each.
-
-Increase samples when required strata/hard negatives would otherwise be underrepresented. Preserve Section 29.3 blinded-review/reliability rules for semantic labels.
-
-Do not invent a separate held-out 100% required-context/all-side gate: those are complete deterministic conformance count gates under current design.
-
-## 10. Held-out retry governance
-
-`phase-2-held-out-retry-policy.md` applies to the probabilistic release gates. Once decisive statistical evidence is observed, a behavior-bearing changed candidate cannot claim fresh authorization from the same split; identical-candidate replay is reproduction-only; later campaigns require fresh preregistered independent evidence.
-
-Deterministic conformance suites remain complete versioned executable contracts rerun in full after code changes; expected outputs change only through reviewed source/design/label corrections.
-
-## 11. Test matrix
-
-Build/catalog: manifest/approval/source change, parser comparison/OCR, canonical/classification, page spans, chunk/source membership, relationship IDs/resolution, conflict IDs/covers, release/cache/lineage identity.
-
-Retrieval: exact document/clause, identifiers/numbers/units, filters/status null, same wording across editions, no-match complete success, deterministic ties.
-
-Required context: applicability, dependencies/definitions, exception directions, table/note context, empty target, reconvergent paths, cycles, unresolved required relation, exact max/one-over bounds.
-
-Conflict: confirmed/explained/unresolved, tier behavior, n-ary records, source covers, graph-conflict fixed point, direct-filter non-erasure, no false precedence.
-
-Interfaces: strict Evidence Package, typed warnings/errors, Python/CLI/MCP equality, both MCP revisions, canonical resources including raw source bytes, cancellation/deadline, admission/frame/page budgets, redaction/path non-leakage.
-
-## 12. Failure semantics
-
-Examples:
-
-- malformed request -> exact validation route;
-- explicit unavailable later mode -> `feature_unavailable`;
-- unknown document/clause/source -> exact not-found/resource-miss route;
-- required closure overflow -> `context_limit_exceeded`, no partial Evidence Package;
-- unresolved critical relationship/conflict -> release blocker;
-- release/schema/lineage/catalog mismatch -> fail closed;
-- cancellation/deadline winner suppresses late success;
-- source/page resource integrity mismatch -> safe resource error/no content;
-- any failed release gate -> no activation, previous release unchanged.
-
-## 13. Implementation sequence
+## 9. Implementation sequence
 
 1. package/workspace/dependencies;
 2. manifest/source approval/change detection;
 3. parser routing/comparison/OCR;
-4. canonical model/vocabulary/classification;
-5. page provenance;
-6. chunks/exact lookup;
-7. relationship occurrence/resolution/edge IDs;
-8. SQLite catalog/integrity;
-9. lexical benchmark/selection/index;
-10. citations/query-independent lineage;
-11. required-context compilation/validation;
-12. conflict compilation/decisions/position covers;
-13. independent graph/context/conflict release validation;
-14. exact/lexical direct seed service;
-15. required graph runtime;
-16. material-conflict runtime fixed point;
-17. central Evidence Package serializer;
-18. typed Python API;
-19. CLI evidence commands;
-20. MCP evidence tools/resources + metadata/list/page/release;
-21. deterministic conformance suites;
-22. probabilistic retrieval/classification/conflict gates under leakage-safe policy;
-23. protocol/admission/cancellation/security/failure injection;
-24. final reports;
-25. candidate assembly/checksum/reopen/startup validation;
-26. rollback validation;
-27. atomic activation;
-28. Phase 3 handoff verification.
+4. canonical model/vocabulary/classification/page provenance;
+5. chunks/exact lookup;
+6. relationship occurrence/resolution/edge IDs;
+7. SQLite catalog integrity;
+8. lexical selection/index;
+9. citations/query-independent lineage;
+10. required-context compilation/validation;
+11. conflict compilation/decisions/position covers;
+12. independent graph/context/conflict release validation;
+13. exact/lexical direct seed runtime;
+14. required graph/conflict fixed point;
+15. explicit supporting/diagnostic optional traversal for Python/MCP `get_context`;
+16. central Evidence Package serializer;
+17. typed Python API;
+18. CLI `search` and `get-clause`;
+19. MCP evidence/metadata tools and resources;
+20. deterministic conformance suites;
+21. probabilistic retrieval/classification/conflict gates;
+22. protocol/admission/cancellation/security/failure injection;
+23. final reports;
+24. candidate assembly/reopen/startup/rollback validation;
+25. atomic activation;
+26. Phase 3 handoff verification.
 
-## 14. Definition of Done
+## 10. Definition of Done
 
-Phase 2 is complete only when:
+Phase 2 is complete only when approved sources deterministically compile to a validated immutable release; exact/lexical seed retrieval is edition-safe; every ordinary seed receives complete required graph/conflict closure; Python/MCP explicit supporting/diagnostic `get_context` works after the required fixed point; CLI scope remains exactly search/get-clause; strict Evidence Package/resource contracts match Section 21-23; mandatory no-match/capability warnings are present; every applicable Section 29.4 deterministic/probabilistic gate passes; protocol/admission/cancellation/security conformance passes; activation/rollback is atomic; and no Phase 3 dense/RRF or Phase 4 automatic high-accuracy supporting-context implementation is hidden in Phase 2.
 
-1. approved source/manifests deterministically compile to one validated immutable release;
-2. exact/lexical seed retrieval is edition-safe/deterministic;
-3. every ordinary evidence seed runs complete current required closure;
-4. every material conflict closes to all required positions/sources;
-5. graph/conflict fixed point and all bounds are deterministic;
-6. required overflow never returns partial success;
-7. strict Evidence Package serialization matches source/catalog/lineage exactly;
-8. current evidence tools/resources satisfy exact Section 22 contracts, including raw source resource bytes/MIME;
-9. Python/CLI/MCP evidence tools use one service;
-10. every applicable Section 29.4 deterministic/probabilistic Phase 2 gate passes;
-11. protocol/admission/cancellation/security conformance passes;
-12. activation/rollback is atomic and reproducible;
-13. no Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation is hidden here.
+## 11. Handoff
 
-## 15. Handoff to Phase 3
+Phase 3 inherits exact/lexical seed retrieval, canonical IDs/filters, graph/context/conflict artifacts, deterministic required fixed point, explicit Python/MCP context inspection, strict ordinary Evidence Package service, interfaces/resources, lineage/release lifecycle, and Phase 2 quality/protocol/security baseline. Phase 3 adds semantic seed selection (embeddings/dense/RRF/query preprocessing/classification) only.
 
-Phase 3 inherits exact/lexical seed retrieval, canonical IDs/filters, validated graph/relationship/context/conflict artifacts, deterministic required graph/conflict closure, strict ordinary Evidence Package service, Python/CLI/MCP evidence interfaces, lineage/cache/release/activation/rollback, and Phase 2 quality/protocol/security baseline.
+Phase 4 inherits the complete Phase 2 ordinary baseline plus Phase 3 hybrid retrieval and adds cross-encoder reranking, automatic supporting-context expansion for high-accuracy search, high-accuracy table/cross-reference improvements, and expanded high-accuracy warning/refusal evaluation.
 
-Phase 3 adds embedding benchmark/selection, chunk embeddings, exact dense retrieval, lexical+dense RRF, deterministic Phase 3 query preprocessing/classification, and Phase 3 release/evaluation identity. Its seeds enter the Phase 2 evidence service unchanged.
+## 12. Review scope
 
-## 16. Handoff to Phase 4
-
-Phase 4 inherits the complete ordinary Phase 2 evidence baseline plus Phase 3 hybrid retrieval. It adds cross-encoder reranking, supporting-context high-accuracy expansion, high-accuracy table/cross-reference improvements, and expanded high-accuracy warning/refusal evaluation. It does not newly introduce ordinary required context, material conflicts, basic Evidence Package assembly, or basic evidence tools.
-
-## 17. Review scope
-
-Review/fixes stay within Phase 2 current-design planning. Do not require Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation details in this PR.
+Review/fixes remain Phase 2 current-design planning only. Do not require Phase 3 dense/RRF or Phase 4 reranking/automatic high-accuracy supporting-context implementation details in this PR.
