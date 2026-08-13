@@ -37,7 +37,10 @@ Phase 2 supports the exact/lexical capabilities available before semantic retrie
 
 - explicit `exact` uses the exact/lexical path defined by current design;
 - `auto` resolves only to capabilities present in the installed runtime and active release;
+- when `auto` would have used a later dense/reranker capability but that capability is unavailable and the runtime falls back to the available Phase 2 exact/lexical path, the successful result **must include the typed `retrieval_capability_unavailable` warning** required by the design;
 - explicit unsupported later modes fail with `feature_unavailable` rather than being relabelled as successful Phase 2 results.
+
+The capability warning is part of the success contract, not an optional diagnostic log. Clients must be able to distinguish a full-capability result from an `auto` fallback.
 
 Required context/conflict correctness is independent of mode speed.
 
@@ -74,7 +77,15 @@ Filters constrain direct seeds only. Required context/conflict attachments prese
 
 ### 5.3 No match
 
-No direct match is a successful `complete` result with empty evidence/context-target/conflict arrays, not a not-found error.
+A valid search with no direct matches is still a successful result, not a not-found error. It must return:
+
+- `context_completeness: complete`;
+- empty `evidence`;
+- empty `context_targets`;
+- empty `conflicts`;
+- a typed **`evidence_insufficient` warning** as required by the current design.
+
+`warnings: []` is not valid for this no-match condition. The warning is the client-visible signal that the successful search did not find adequate evidence.
 
 ## 6. Required graph/conflict handoff
 
@@ -133,7 +144,12 @@ Use only `complete`, `incomplete_required`, and `truncated_optional` under their
 
 ## 13. Typed warnings
 
-Implement the exact diagnostics needed by ordinary Phase 2 evidence, including source-coordinate/parser/OCR uncertainty, classification unresolved, context incomplete/cycle/status boundary, cross-reference unresolved, table anomaly, applicability/evidence insufficiency, `evidence_conflict`, and `conflict_unresolved` where applicable.
+Implement the exact diagnostics needed by ordinary Phase 2 evidence, including source-coordinate/parser/OCR uncertainty, classification unresolved, context incomplete/cycle/status boundary, cross-reference unresolved, table anomaly, applicability/evidence insufficiency, `evidence_conflict`, `conflict_unresolved`, and `retrieval_capability_unavailable` where applicable.
+
+Two warning cases are explicitly mandatory:
+
+1. an `auto` request that falls back because a later dense/reranker capability is unavailable returns `retrieval_capability_unavailable`;
+2. a valid no-match search returns `evidence_insufficient` even though the response is otherwise a `complete` empty success.
 
 Warnings use code-owned messages and closed safe details.
 
@@ -180,11 +196,11 @@ Do not invent a separate held-out 100% context/all-side gate in place of Section
 
 ## 20. Required conformance fixtures
 
-Include exact clause with/without expansion, lexical dependency/definition, exception+condition, table context, empty target, unresolved standard/critical cases, confirmed/unresolved conflicts, graph-conflict fixed point, required overflow, no-match success, filter/status preservation, Python/CLI/MCP equivalence, and raw source resource byte/MIME contract.
+Include exact clause with/without expansion, lexical dependency/definition, exception+condition, table context, empty target, unresolved standard/critical cases, confirmed/unresolved conflicts, graph-conflict fixed point, required overflow, **no-match success with mandatory `evidence_insufficient`**, **`auto` fallback with mandatory `retrieval_capability_unavailable`**, filter/status preservation, Python/CLI/MCP equivalence, and raw source resource byte/MIME contract.
 
 ## 21. Negative/security fixtures
 
-Cover malformed IDs/overlimits/extra properties, forged sources, resource URI attacks, path leakage, invalid graph edges, fabricated context-target source fields, citation/page mismatch, missing conflict side, false precedence, output-budget overflow, and cancellation/deadline late-success races.
+Cover malformed IDs/overlimits/extra properties, forged sources, resource URI attacks, path leakage, invalid graph edges, fabricated context-target source fields, citation/page mismatch, missing conflict side, false precedence, output-budget overflow, cancellation/deadline late-success races, **no-match success missing `evidence_insufficient`**, and **auto fallback missing `retrieval_capability_unavailable`**.
 
 ## 22. Implementation sequence
 
@@ -192,7 +208,7 @@ Cover malformed IDs/overlimits/extra properties, forged sources, resource URI at
 2. implement exact/lexical seed service;
 3. implement required graph/conflict fixed point;
 4. implement evidence/context-target/conflict projections;
-5. implement completeness/warning/error routing;
+5. implement completeness/warning/error routing, including mandatory no-match and auto-fallback warnings;
 6. implement central serializer;
 7. expose typed Python service;
 8. project through CLI/MCP tools;
@@ -202,4 +218,4 @@ Cover malformed IDs/overlimits/extra properties, forged sources, resource URI at
 
 ## 23. Acceptance criteria
 
-Phase 2 evidence-service work is complete only when exact/lexical seeds are deterministic/edition-safe; every ordinary evidence seed enters complete required graph/conflict closure; central strict serialization passes; evidence tools meet Section 22; metadata/list/page remain safe; source/build/assembly lineage is correct; empty targets are not fabricated; all material sides are preserved; completeness/warnings/errors match design; required overflow yields no partial package; Python/CLI/MCP evidence semantics are equivalent; MCP resources obey their independent exact contracts (especially raw source text); current Section 29.4 gates and protocol/security/activation/rollback conformance pass; and no Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation is pulled into Phase 2.
+Phase 2 evidence-service work is complete only when exact/lexical seeds are deterministic/edition-safe; every ordinary evidence seed enters complete required graph/conflict closure; central strict serialization passes; evidence tools meet Section 22; **every no-match search includes `evidence_insufficient`**, **every applicable `auto` capability fallback includes `retrieval_capability_unavailable`**; metadata/list/page remain safe; source/build/assembly lineage is correct; empty targets are not fabricated; all material sides are preserved; completeness/warnings/errors match design; required overflow yields no partial package; Python/CLI/MCP evidence semantics are equivalent; MCP resources obey their independent exact contracts (especially raw source text); current Section 29.4 gates and protocol/security/activation/rollback conformance pass; and no Phase 3 dense/RRF or Phase 4 reranking/supporting-context implementation is pulled into Phase 2.
