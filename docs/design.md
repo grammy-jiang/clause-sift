@@ -2074,17 +2074,23 @@ This stage-and-gate view is explanatory; the numbered sequence above defines the
 flowchart TD
     INPUTS[Sources, manifests, vocabulary, and build inputs] --> ADMISSION[Hash, approve, detect changes, and select parser routes]
     ADMISSION --> PARSE[Produce parser-neutral artifacts]
-    PARSE --> PARSER_GATE{Parser validation and comparison pass?}
+    PARSE --> PARSER_REPORT[Persist the parser-validation report]
+    PARSER_REPORT --> PARSER_GATE{Parser validation and comparison pass?}
     PARSER_GATE -->|no| DIAGNOSTICS[Retain durable diagnostics; active pointer unchanged]
     PARSER_GATE -->|yes| CANONICAL[Build canonical trees, page provenance, and chunks]
     CANONICAL --> GRAPH[Resolve edges and classify conflict candidates]
     GRAPH --> CATALOG_GATE{Candidate catalog validation passes?}
     CATALOG_GATE -->|no| DIAGNOSTICS
     CATALOG_GATE -->|yes| RETRIEVAL[Build embeddings, lexical index, and vector index]
-    RETRIEVAL --> LINEAGE[Validate traversal and materialize lineage]
-    LINEAGE --> QUALITY_GATE{Evaluation and quality gates pass?}
+    RETRIEVAL --> LINEAGE_GATE{Traversal validation and lineage materialization pass?}
+    LINEAGE_GATE -->|no| DIAGNOSTICS
+    LINEAGE_GATE -->|yes| EVALUATION[Derive build_content_id, run evaluation, and persist results or a sanitized failure record]
+    EVALUATION --> REPORTS[Finalize static review reports]
+    REPORTS --> QUALITY_GATE{Quality gates pass?}
     QUALITY_GATE -->|no| DIAGNOSTICS
-    QUALITY_GATE -->|yes| CANDIDATE[Assemble candidate release]
+    QUALITY_GATE -->|yes| BLOCKER_GATE{No release-blocking finding remains?}
+    BLOCKER_GATE -->|no| DIAGNOSTICS
+    BLOCKER_GATE -->|yes| CANDIDATE[Assemble candidate release]
     CANDIDATE --> RELEASE_GATE{Checksums and read-only smoke tests pass?}
     RELEASE_GATE -->|no| DIAGNOSTICS
     RELEASE_GATE -->|yes| ACTIVATE[Publish and atomically replace active.json]
