@@ -10,7 +10,7 @@
 
 This clarification closes three Phase 3 release-identity requirements identified during review.
 
-Where the companion Phase 3 plan is less specific or cites the wrong design section for these requirements, this document is authoritative. It remains entirely within Phase 3.
+Where the companion Phase 3 plan is less specific, this document is authoritative for these requirements. It remains entirely within Phase 3.
 
 ## 2. Byte-identical canonical embedding artifact
 
@@ -98,7 +98,7 @@ The authoritative per-artifact cache dependency contract is:
 docs/design.md Section 25 — Build cache and invalidation
 ```
 
-Any reference in the companion Phase 3 plan that points to Section 32 for embedding/vector cache dependencies is superseded by this clarification and must be implemented against **Section 25**.
+The companion Phase 3 plan already points its embedding/vector cache work at Section 25. This clarification confirms that Section 25 is the sole cache-dependency authority and prevents future drift; it does **not** imply that a current Section 32 cache reference remains to be corrected.
 
 Phase 3 inherits the complete Section 25 dependency entries for:
 
