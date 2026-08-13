@@ -121,6 +121,8 @@ The implementation must preserve all of the following.
 18. Request-specific ranks/scores/fusion/context paths are runtime assembly lineage, not release mutation.
 19. All normal work remains bounded, cancelable, deadline-aware, and subject to the common runtime admission/quarantine contract.
 20. Quality gates precede performance optimization.
+21. The exact production query-preprocessing identity is frozen and implemented before embedding-model or RRF selection begins; changing it invalidates those selection reports.
+22. Phase 3 release gates are evaluated on the final frozen user-facing Phase 3 retrieval paths, never satisfied by substituting a diagnostic dense-only or lower-phase lexical result.
 
 ## 5. Deliverables
 
@@ -221,6 +223,8 @@ Before selecting a model, define strict versioned contracts for:
 - Phase 3 held-out campaign ledger;
 - Phase 3 release/cache/lineage dependencies.
 
+The **production query-preprocessing contract is implemented and frozen at this stage**, before model/RRF selection. Query analysis/classification may be implemented later, but the byte transformation that feeds query embedding and any model/RRF selection harness cannot be provisional after selection starts.
+
 ### 7.1 Embedding provider
 
 The provider contract must expose enough deterministic metadata to bind build and query behavior:
@@ -300,6 +304,8 @@ Tests must prove stable bytes, correct invalidation, edition separation, and no 
 
 No model is selected by popularity or generic benchmark reputation.
 
+**Every benchmark query passes through the already frozen production query-preprocessing implementation and records its exact preprocessing identity.** A model-selection report produced with another preprocessing identity is not reusable.
+
 ### 9.1 Candidate shortlist
 
 Benchmark a small replaceable set that can realistically support:
@@ -339,18 +345,21 @@ Include at minimum:
 For each candidate:
 
 1. freeze model/provider/asset/configuration identity;
-2. embed the same immutable benchmark chunk set;
-3. verify deterministic row mapping;
-4. verify canonical release-byte reproducibility under the admitted build environment;
-5. run exact dense search;
-6. measure Recall@5 and Recall@20 plus secondary ranking diagnostics;
-7. report every required stratum;
-8. measure build throughput and artifact size;
-9. measure cold load, warm query embedding, and dense search separately;
-10. measure peak RSS;
-11. retain rejected candidate results.
+2. use the frozen production query-preprocessing implementation/identity for every benchmark query;
+3. embed the same immutable benchmark chunk set;
+4. verify deterministic row mapping;
+5. verify canonical release-byte reproducibility under the admitted build environment;
+6. run exact dense search;
+7. measure Recall@5 and Recall@20 plus secondary ranking diagnostics;
+8. report every required stratum;
+9. measure build throughput and artifact size;
+10. measure cold load, warm query embedding, and dense search separately;
+11. measure peak RSS;
+12. retain rejected candidate results.
 
 Selection priority is retrieval correctness, hard-negative/cross-language robustness, reproducibility/safe loading, runtime feasibility, then speed/packaging simplicity.
+
+Any behavior-bearing preprocessing change after selection invalidates the model-selection evidence and requires rerunning model selection before the changed candidate can progress.
 
 ## 10. Work package D — Offline embedding artifact
 
@@ -469,6 +478,8 @@ A vector row that cannot map one-to-one to catalog identity is a release-integri
 
 Only the current query is embedded at runtime.
 
+The **production query-preprocessing implementation was already frozen before model selection** under Work package A. This work package integrates that exact implementation into runtime query embedding; it does not define or retune it after model/RRF selection.
+
 Query preprocessing is deterministic and release-bound. It must not silently:
 
 - remove negation;
@@ -507,6 +518,8 @@ Benchmark bounded candidates for:
 - final fused pool size;
 - `rrf_k`;
 - channel weighting only if explicitly admitted and evidence shows plain RRF is insufficient.
+
+RRF/candidate-pool selection uses the same already-frozen production query-preprocessing identity used by model selection. A preprocessing change invalidates the RRF-selection report as well as the model-selection report.
 
 ### 14.3 Deterministic ordering
 
@@ -584,16 +597,22 @@ Tests cover all failure/replay/rotation boundaries, including query-preprocessin
 
 ## 17. Work package K — Regression evaluation
 
-### 17.1 Primary retrieval gates
+### 17.1 Blocking gates are bound to production paths
 
-For independently labelled applicable cases:
+The Phase 3 Wilson gates are **not generic metrics that any retrieval slice may satisfy**. They are release-authorizing gates for the frozen user-facing Phase 3 paths.
+
+For independently labelled applicable cases, the **final frozen classifier-selected production path**—including the exact production query preprocessing, deterministic query analysis/classification, whichever exact/lexical/dense channels it resolves, RRF where selected, metadata filters, and the inherited lower-phase evidence pipeline—must satisfy:
 
 - Recall@20 one-sided 95% Wilson lower bound >= 98%;
 - Top-5 one-sided 95% Wilson lower bound >= 95%.
 
-Use at least 150 applicable cases for each 98% gate and at least 60 for each 95% gate, expanding samples as needed for critical strata.
+Because `hybrid` is also an explicit user-selectable Phase 3 mode, the **frozen explicit `hybrid` path** must independently satisfy the same two gates on the applicable hybrid-mode confirmation cases.
 
-Always report numerator, denominator, point estimate, lower bound, corpus/split identity, and complete candidate identity.
+Dense-only retrieval remains a diagnostic/component benchmark unless a future public contract exposes it as an independent user-facing mode; dense-only results cannot authorize Phase 3 release by substituting for a failing classifier-selected or explicit-hybrid path. Lower-phase exact/lexical gates remain independently required by their owning phase and likewise cannot be counted as Phase 3 path-gate evidence.
+
+Use at least 150 applicable cases for each 98% gate and at least 60 for each 95% gate, expanding samples as needed for critical strata. Where the classifier-selected and explicit-hybrid populations overlap, report them as separately named gate families with explicit denominators rather than pooling them ambiguously.
+
+Always report numerator, denominator, point estimate, lower bound, corpus/split identity, complete candidate identity, and the exact evaluated production-path identity.
 
 ### 17.2 Comparative gates
 
@@ -604,6 +623,8 @@ Compare:
 - best lower-phase path vs classifier-selected Phase 3 path.
 
 Do not permit global-average improvement to hide critical regressions in exact document codes, exact clauses, product models, numbers/units, wrong-edition hard negatives, negation, or exceptions.
+
+The comparative tables are diagnostic/complementary evidence; they do not replace the blocking production-path gates in Section 17.1.
 
 ### 17.3 Query-classifier evaluation
 
@@ -734,6 +755,7 @@ Do not introduce ANN merely because a synthetic larger corpus is slower; record 
 Test:
 
 - embedding-text determinism;
+- production query-preprocessing determinism before model/RRF selection;
 - model/provider/asset identity;
 - row order;
 - float16 conversion;
@@ -743,10 +765,12 @@ Test:
 - metadata filters;
 - dense mapping;
 - RRF/dedup/tie-breaking;
-- query preprocessing/features/classification;
+- query features/classification;
 - Phase 3 campaign ledger/state transitions;
 - Section 25 cache keys;
-- closed Evidence Package retrieval/fusion serialization.
+- closed Evidence Package retrieval/fusion serialization;
+- final classifier-selected production-path gate accounting;
+- explicit-hybrid production-path gate accounting.
 
 ### 22.2 Integration
 
@@ -785,35 +809,39 @@ Include:
 - one-sided conflict seed;
 - observed confirmation split reused by changed candidate;
 - second decisive final confirmation in one campaign;
-- reproduction-only replay incorrectly treated as new release evidence.
+- reproduction-only replay incorrectly treated as new release evidence;
+- changed preprocessing identity with stale model/RRF selection report;
+- final classifier-selected path failing while dense-only passes;
+- explicit hybrid path failing while another evaluated slice passes.
 
 ## 23. Implementation sequence
 
 1. Merge/validate the separate Phase 2 corrective prerequisite before release-capable Phase 3 integration or final confirmation.
-2. Freeze Phase 3 schemas/interfaces and test fixtures.
-3. Implement deterministic embedding-text projection.
-4. Implement embedding-provider and model-asset identity.
-5. Build benchmark harness.
-6. Benchmark/select/freeze model on selection data.
-7. Build canonical chunk embeddings.
-8. Build/validate deterministic row map.
-9. Implement bounded safe artifact loader.
-10. Implement exact dense backend and canonical hit mapping.
-11. Implement lazy current-query embedding.
-12. Implement lexical+dense deduplication and RRF.
-13. Benchmark candidate pools/RRF on selection data.
-14. Implement deterministic query preprocessing/analysis/classification.
-15. Integrate hybrid seeds with the corrected Phase 2 evidence service.
-16. Implement Section 25 invalidation and Phase 3 release identity.
-17. Implement query-independent lineage additions and closed-schema runtime provenance.
-18. Add unit/integration/negative/reproducibility/security tests.
-19. Add comparative retrieval and downstream evidence-semantics evaluation.
-20. Freeze the complete Phase 3 candidate identity.
-21. Preregister the Phase 3 campaign and final confirmation split.
-22. Run the single final decisive confirmation under the Phase 3 campaign policy.
-23. Produce final benchmark/gate/performance/release reports.
-24. Validate activation and rollback.
-25. Record Phase 4 handoff without implementing Phase 4.
+2. Freeze Phase 3 schemas/interfaces, including the complete production query-preprocessing schema/rules/configuration and test fixtures.
+3. Implement and freeze the deterministic production query-preprocessing path; record its identity and make the same implementation available to benchmark harnesses.
+4. Implement deterministic `embedding_text` projection.
+5. Implement embedding-provider and model-asset identity.
+6. Build the embedding benchmark harness around the frozen production preprocessing path.
+7. Benchmark/select/freeze the embedding model on selection data using that exact preprocessing identity.
+8. Build canonical chunk embeddings.
+9. Build/validate deterministic row map.
+10. Implement bounded safe artifact loader.
+11. Implement exact dense backend and canonical hit mapping.
+12. Implement lazy current-query embedding by integrating the already frozen production preprocessing path.
+13. Implement lexical+dense deduplication and RRF.
+14. Benchmark candidate pools/RRF on selection data using the same frozen production preprocessing identity; any preprocessing change invalidates both model and RRF selection and returns to step 3.
+15. Implement deterministic query analysis/classification on top of the already frozen preprocessing path.
+16. Integrate classifier-selected/hybrid seeds with the corrected Phase 2 evidence service.
+17. Implement Section 25 invalidation and Phase 3 release identity.
+18. Implement query-independent lineage additions and closed-schema runtime provenance.
+19. Add unit/integration/negative/reproducibility/security tests.
+20. Add comparative retrieval and downstream evidence-semantics evaluation.
+21. Freeze the complete final production candidate identity, including preprocessing, model, dense backend, candidate pools, RRF, and classifier configuration.
+22. Preregister the Phase 3 campaign and the separately named classifier-selected and explicit-hybrid blocking gate families/final confirmation cases.
+23. Run the single final decisive confirmation; both the final classifier-selected production path and explicit-hybrid path must meet their applicable Section 17.1 gates.
+24. Produce final benchmark/gate/performance/release reports.
+25. Validate activation and rollback.
+26. Record Phase 4 handoff without implementing Phase 4.
 
 ## 24. Acceptance criteria
 
@@ -821,51 +849,57 @@ Phase 3 is complete only when:
 
 1. the separate Phase 2 corrective prerequisite is merged and validated;
 2. the embedding provider is replaceable and model-native objects do not leak into canonical/public contracts;
-3. model selection is supported by project-specific multilingual/hard-negative evidence;
-4. every persisted chunk has exactly one vector and no non-chunk vector rows exist;
-5. vector row order is exactly the versioned canonical order and independently reconstructable;
-6. the v0.1 artifact is exactly safe read-only `float16` `embeddings.f16.npy` with bounded header/pickle-disabled loading;
-7. complete model/provider/asset identity is bound into build/release/runtime compatibility;
-8. deterministic query preprocessing is release-bound and included in frozen candidate identity;
-9. identical complete build identity produces byte-identical canonical embedding bytes/hash;
-10. exact dense search and top-K ordering are deterministic;
-11. dense hits map one-to-one to canonical lower-phase identity;
-12. metadata/edition safety is preserved;
-13. RRF is versioned, benchmark-selected, deterministic, and canonical-ID based;
-14. query analysis/classification is deterministic and non-LLM;
-15. exact-style queries retain exact/lexical protections;
-16. natural-language queries execute the hybrid path when capability exists;
-17. explicit hybrid failures are visible, not silently relabelled fallbacks;
-18. Recall@20 and Top-5 Wilson gates pass with required sample sizes/stratification;
-19. critical exact/numeric/identifier/wrong-edition/negation strata do not regress unacceptably;
-20. the Phase 3 campaign retires observed decisive splits, restricts identical-candidate replay to reproduction, has one final decisive confirmation per campaign, and requires fresh decisive data after failed campaigns;
-21. Section 25 cache/release invalidation covers every behavior-bearing Phase 3 input;
-22. immutable `lineage.json` contains only query-independent Phase 3 transformations/artifacts/configuration identities;
-23. request-specific retrieval provenance uses only the existing closed `assembly.retrievals[]`, `assembly.fusion`, package-level `retrieval_mode`, and existing context/conflict fields;
-24. no unversioned Evidence Package fields are introduced;
-25. hybrid retrieval composes with corrected Phase 2 required context/conflict semantics without weakening citations/source/edition identity;
-26. corruption/model integrity failure follows fail-closed/quarantine semantics;
-27. cancellation/deadline/model loading uses the common runtime terminal-state implementation;
-28. documentation, unit, integration, negative, reproducibility, release, activation, and rollback checks pass;
-29. no Phase 2 corrective implementation detail is pulled into Phase 3;
-30. no Phase 4 reranking/supporting-context/table/xref/high-accuracy warning/refusal implementation is pulled into Phase 3.
+3. the production query-preprocessing path is implemented/frozen before model or RRF selection and is identical between selection, final confirmation, and runtime;
+4. model selection is supported by project-specific multilingual/hard-negative evidence bound to that exact preprocessing identity;
+5. every persisted chunk has exactly one vector and no non-chunk vector rows exist;
+6. vector row order is exactly the versioned canonical order and independently reconstructable;
+7. the v0.1 artifact is exactly safe read-only `float16` `embeddings.f16.npy` with bounded header/pickle-disabled loading;
+8. complete model/provider/asset identity is bound into build/release/runtime compatibility;
+9. deterministic query preprocessing is release-bound and included in frozen candidate identity;
+10. identical complete build identity produces byte-identical canonical embedding bytes/hash;
+11. exact dense search and top-K ordering are deterministic;
+12. dense hits map one-to-one to canonical lower-phase identity;
+13. metadata/edition safety is preserved;
+14. RRF is versioned, benchmark-selected, deterministic, canonical-ID based, and selected using the same frozen production preprocessing identity;
+15. query analysis/classification is deterministic and non-LLM;
+16. exact-style queries retain exact/lexical protections;
+17. natural-language queries execute the hybrid path when capability exists;
+18. explicit hybrid failures are visible, not silently relabelled fallbacks;
+19. the **final frozen classifier-selected production path** passes Recall@20 with one-sided 95% Wilson lower bound >= 98% and Top-5 with lower bound >= 95% on its applicable final confirmation cases;
+20. the **frozen explicit `hybrid` path** independently passes the same two Wilson gates on applicable explicit-hybrid final confirmation cases;
+21. dense-only/component results and lower-phase lexical/exact results cannot substitute for either failing Phase 3 production-path gate;
+22. each gate reports numerator, denominator, point estimate, lower bound, corpus/split identity, candidate identity, and evaluated path identity with required sample sizes/stratification;
+23. critical exact/numeric/identifier/wrong-edition/negation strata do not regress unacceptably;
+24. the Phase 3 campaign retires observed decisive splits, restricts identical-candidate replay to reproduction, has one final decisive confirmation per campaign, and requires fresh decisive data after failed campaigns;
+25. Section 25 cache/release invalidation covers every behavior-bearing Phase 3 input;
+26. immutable `lineage.json` contains only query-independent Phase 3 transformations/artifacts/configuration identities;
+27. request-specific retrieval provenance uses only the existing closed `assembly.retrievals[]`, `assembly.fusion`, package-level `retrieval_mode`, and existing context/conflict fields;
+28. no unversioned Evidence Package fields are introduced;
+29. hybrid retrieval composes with corrected Phase 2 required context/conflict semantics without weakening citations/source/edition identity;
+30. corruption/model integrity failure follows fail-closed/quarantine semantics;
+31. cancellation/deadline/model loading uses the common runtime terminal-state implementation;
+32. documentation, unit, integration, negative, reproducibility, release, activation, and rollback checks pass;
+33. no Phase 2 corrective implementation detail is pulled into Phase 3;
+34. no Phase 4 reranking/supporting-context/table/xref/high-accuracy warning/refusal implementation is pulled into Phase 3.
 
 ## 25. Phase 3 exit artifacts
 
 The merged plan requires the implementation to produce:
 
+- frozen production query-preprocessing identity and implementation evidence;
 - selected model/provider/asset decision record;
-- embedding benchmark report;
-- embedding-text and query-preprocessing identities;
+- embedding benchmark report bound to that preprocessing identity;
+- embedding-text identity;
 - canonical embedding artifact metadata/hash;
 - row-map identity;
 - dense backend/metric identity;
-- RRF identity;
+- RRF identity and selection report bound to the same preprocessing identity;
 - query-analysis/classifier identity;
 - Section 25 cache/build identities;
 - query-independent Phase 3 lineage update;
 - request-scoped retrieval/fusion assembly provenance using the closed schema;
 - lexical/dense/hybrid comparative report;
+- final classifier-selected and explicit-hybrid production-path gate reports;
 - downstream context/conflict regression report;
 - Phase 3 campaign ledger and final confirmation report;
 - cold/warm/model-free performance report;
