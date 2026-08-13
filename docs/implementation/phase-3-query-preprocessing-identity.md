@@ -10,31 +10,66 @@
 
 The deterministic preprocessing applied immediately before current-query embedding is behavior-bearing retrieval configuration. A preprocessing change can change the query vector, dense ranking, RRF result, selected retrieval seeds, and therefore the evidence returned for the same request.
 
-It is therefore insufficient to bind query preprocessing only into an optional in-process query-embedding cache key.
+Embedding candidates may require different query instructions, prefixes, templates, tokenizer-facing separators, or query/document role markers. Phase 3 therefore does **not** freeze one global model-specific query projection before candidate model identity is known.
 
-Where the companion Phase 3 plan omits query-preprocessing identity from the frozen candidate, release/build identity, cache invalidation, lineage, or release-gate evidence, this clarification is authoritative.
+Instead:
+
+1. Phase 3 first freezes one generic preprocessing schema/framework and the rules for constructing candidate-specific projections;
+2. each embedding candidate then freezes its own complete model-specific query/document preprocessing projection **before that candidate is benchmarked**;
+3. benchmark selection chooses the complete `(model/provider/assets/configuration, preprocessing projection)` pair;
+4. only the winning candidate's already-evaluated projection becomes the production projection;
+5. that winning projection is carried unchanged into RRF selection, final confirmation, release identity, and runtime.
+
+Where the companion Phase 3 plan omits this distinction, this clarification is authoritative.
 
 This is entirely Phase 3 scope. It does not add reranking, supporting-context expansion, or any other Phase 4 capability.
 
-## 2. Canonical query-preprocessing contract
+## 2. Generic preprocessing framework
 
-Phase 3 defines one versioned deterministic query-embedding preprocessing projection.
+Before embedding-model benchmarking begins, Phase 3 defines and implements one versioned deterministic **preprocessing framework**, not one global candidate projection.
 
-Its identity contains at minimum:
+The framework defines the closed set of behavior-bearing projection fields and canonical hashing/serialization rules that a candidate may use, including at minimum:
 
 - `query_preprocessing_schema_version`;
 - `query_preprocessing_rule_set_version`;
+- normalization implementation/producer identity;
+- Unicode normalization policy;
+- whitespace/trim policy;
+- canonical query-byte construction rule;
+- identifier/number/unit preservation rules;
+- model-required prefix/suffix/instruction/template fields;
+- query role-marker fields;
+- corresponding document role-marker or embedding-side role convention where required;
+- supported separator/control-token policy where explicitly admitted by the model/tokenizer contract;
+- deterministic configuration hashing rules.
+
+The framework must be implemented before candidate benchmarking so every candidate projection is built, serialized, hashed, and evaluated through the same deterministic machinery.
+
+## 3. Candidate-specific preprocessing projection
+
+For each embedding candidate, once the candidate's provider/model/revision/tokenizer/asset identity and declared preprocessing requirements are known, construct and freeze a complete model-specific projection before the first benchmark query is embedded.
+
+Its identity contains at minimum:
+
+- generic preprocessing schema version;
+- generic rule-set version;
+- candidate projection schema/version where separately versioned;
 - `query_preprocessing_configuration_sha256`;
-- the exact normalization implementation/producer version when that behavior is not already completely identified by the rule-set version;
-- any deterministic tokenizer-facing prefix/suffix/template identity required by the selected embedding model;
-- any model-required query/document role marker identity;
-- the exact canonicalization rule used to derive the bytes submitted to the embedding provider.
+- exact normalization producer/version when behavior-bearing;
+- exact query prefix/suffix/instruction/template identity required by that candidate;
+- exact query role-marker identity;
+- exact corresponding document role-marker/embedding-role identity where required;
+- separator/control-token policy where applicable;
+- exact canonicalization rule used to derive bytes submitted to the provider;
+- exact tokenizer/provider behavior identity needed to interpret those bytes.
 
-The configuration hash is computed over the versioned canonical behavior-bearing configuration, not over mutable file paths or a prose description.
+The configuration hash is computed over the complete canonical behavior-bearing projection, not mutable paths or prose descriptions.
 
-## 3. Authority boundary
+A candidate benchmark run is invalid if the candidate-specific projection was not frozen before that run.
 
-Query preprocessing may perform only the deterministic operations admitted by the design and selected configuration.
+## 4. Authority boundary
+
+Every candidate projection may perform only deterministic operations admitted by the generic framework and design.
 
 It must not silently:
 
@@ -45,114 +80,146 @@ It must not silently:
 - add generated answer text;
 - perform LLM rewriting;
 - infer applicability, authority, normative force, or precedence;
-- use a different preprocessing path in evaluation than in production.
+- select or mutate a prefix/template in response to held-out results.
 
-The resulting query-preprocessing bytes are retrieval input only. They do not become source evidence or alter the authoritative query/request fields retained for diagnostics and provenance.
+The resulting preprocessed bytes are retrieval input only. They do not become source evidence or alter authoritative request fields.
 
-## 4. Frozen Phase 3 candidate identity
+## 5. Candidate identity and model-selection binding
 
-The **complete frozen candidate identity** used for benchmark selection and held-out confirmation includes the query-preprocessing identity alongside the other Phase 3 behavior-bearing inputs.
+The **model-selection candidate identity** is the complete candidate pair, not a model alone.
 
-At minimum it includes:
+At minimum it binds:
 
-- embedding model ID and revision;
+- embedding provider/model ID and revision;
 - complete bound model/tokenizer asset identity;
 - embedding provider/configuration identity;
 - document `embedding_text` schema/configuration identity;
-- **query-preprocessing schema/rule/configuration identity**;
+- candidate-specific query-preprocessing identity;
+- corresponding document role/projection identity where required by the model;
 - canonical release dtype and normalization rule;
 - vector row-order identity;
-- exact dense backend/metric/configuration;
-- lexical and dense candidate-pool sizes;
-- RRF configuration;
-- query-analysis rule-set/configuration;
-- classifier rule-set/configuration;
+- exact dense backend/metric/configuration when part of the evaluated candidate;
 - relevant dependency-lock/toolchain identity.
 
-Changing query preprocessing therefore creates a **new Phase 3 candidate**. Prior held-out gate results from the old preprocessing may not authorize the new candidate.
+Changing the candidate-specific preprocessing projection creates a new candidate even if the model assets are unchanged.
 
-## 5. Release and build identity
+Benchmark comparison selects a complete model+projection pair. A preprocessing projection may not be optimized after observing decisive held-out results and then attached retroactively to a previously benchmarked model.
 
-The active release must bind the exact query-preprocessing behavior under which its hybrid retrieval configuration was evaluated.
+## 6. Winning production projection
 
-The release manifest and/or its versioned behavior-configuration artifact records, as required by the existing release schema:
+After model-selection data choose the winning candidate pair, the winner's already-evaluated query/document preprocessing projection becomes the **production preprocessing projection**.
 
-- query-preprocessing schema version;
-- rule-set version;
-- configuration SHA-256;
+The winning projection is then reused unchanged for:
+
+- RRF/candidate-pool selection;
+- query-classifier integration tests where dense embeddings are used;
+- final Phase 3 confirmation;
+- active-release behavior identity;
+- runtime current-query embedding;
+- rollback compatibility.
+
+A behavior-bearing change to the winning projection after model selection invalidates the model-selection report. A behavior-bearing change after RRF selection invalidates both model- and RRF-selection evidence. The changed configuration is a new Phase 3 candidate and must repeat the applicable selection process before final confirmation.
+
+Thus “evaluation and production use the same preprocessing” means **the winning candidate's frozen projection** is identical between the evidence that selected/confirmed the winner and production. It does not mean every rejected model candidate had to use one universal projection.
+
+## 7. Release and build identity
+
+The active release binds the exact winning preprocessing behavior under which its Phase 3 hybrid configuration was selected and confirmed.
+
+The release manifest and/or versioned retrieval-configuration artifact records:
+
+- generic preprocessing schema/rule-set versions;
+- winning candidate projection identity/configuration SHA-256;
 - producer/version identity where applicable;
-- any selected model-required query-template/role-marker identity;
-- the hash of the complete canonical behavior object if the release schema uses one aggregate retrieval-configuration artifact.
+- winning model-required query template/prefix/role-marker identity;
+- corresponding document-role/projection identity where required;
+- hash of the complete canonical behavior object where the release schema uses an aggregate artifact.
 
-These values are inputs to `build_content_id`/release identity through the existing non-recursive release dependency graph.
+These values participate in build/release identity through the existing non-recursive dependency graph.
 
-A runtime whose supported query-preprocessing contract does not match the active release fails capability/release validation rather than applying a locally convenient preprocessing rule.
+A runtime whose supported preprocessing framework or winning projection identity does not match the active release fails validation/capability checks rather than applying local convenience behavior.
 
-## 6. Cache identity and invalidation
+## 8. Cache identity and invalidation
 
-The optional in-process query-embedding cache remains keyed by the exact normalized/preprocessed query bytes and model identity, but that is only a runtime optimization.
+An optional in-process query-embedding cache is keyed by exact winning-projection output bytes plus the compatible model/release identity.
 
-Separately, the authoritative build/release dependency model must treat query-preprocessing identity as behavior-bearing retrieval configuration.
+Separately, the authoritative build/release dependency model treats the winning preprocessing identity as behavior-bearing retrieval configuration.
 
-A change to any of the following invalidates the relevant Phase 3 candidate/release evidence and every cache or derived result whose semantics depend on the query vector:
+A change to any of the following invalidates every dependent candidate/release/cache result:
 
 - preprocessing schema version;
-- preprocessing rule-set version;
-- preprocessing configuration hash;
+- rule-set version;
+- winning projection configuration hash;
 - preprocessing producer/version when behavior-bearing;
-- model-required query prefix/suffix/template/role marker;
+- model-required prefix/suffix/instruction/template;
+- query or document role marker;
+- separator/control-token policy where applicable;
 - canonical query-byte projection rule.
 
-The invalidation suite must demonstrate that a preprocessing change cannot reuse prior held-out confirmation evidence or a stale behavior identity merely because the document embedding matrix itself is unchanged.
+The invalidation suite must prove a preprocessing change cannot reuse prior selection/final-confirmation evidence merely because document embeddings or model assets are unchanged.
 
-## 7. Evaluation binding
+## 9. Evaluation binding
 
-Every model-selection, RRF-selection, query-classifier comparison, and final held-out retrieval-gate report records the exact query-preprocessing identity used to generate query embeddings.
+### 9.1 Candidate benchmark reports
 
-The final gate report binds at minimum:
+Every embedding-candidate benchmark report records that candidate's exact frozen preprocessing projection identity.
 
-- candidate identity/hash;
-- query-preprocessing schema version;
-- query-preprocessing configuration hash;
+Candidate A and candidate B may legitimately have different projections when their model contracts require different instructions/role markers. Comparisons remain valid because each pair is frozen before evaluation and fully identified.
+
+### 9.2 RRF-selection reports
+
+RRF and candidate-pool tuning run only after a winning model+projection pair is selected. Every RRF-selection report records the winning projection identity and must use it unchanged.
+
+### 9.3 Final confirmation
+
+The final Phase 3 gate report binds at minimum:
+
+- complete final candidate identity/hash;
+- winning preprocessing schema/rule-set/projection identity;
 - embedding model/asset identity;
 - dense/RRF/classifier configuration identity;
 - evaluation corpus/split identity;
+- evaluated production-path identity;
 - numerator, denominator, point estimate, and one-sided confidence bound for each applicable gate.
 
-A report generated under preprocessing configuration A cannot authorize configuration B.
+A report generated under winning projection A cannot authorize projection B.
 
-## 8. Evidence Lineage and retrieval provenance
+## 10. Evidence Lineage and retrieval provenance
 
-Phase 3 retrieval provenance must be sufficient to reproduce why a dense/hybrid seed was selected.
+The winning preprocessing identity is query-independent behavior configuration and may be referenced safely by immutable release/build lineage according to the canonical Phase 3 plan.
 
-For model-assisted dense retrieval, the release-bound retrieval lineage/configuration therefore identifies the query-preprocessing schema/configuration together with the embedding model/vector/RRF identities.
+Request-specific retrieval ranks/scores remain runtime Evidence Package assembly provenance using the existing closed schema. This clarification does not add new public Evidence Package fields.
 
-The public evidence item need not expose internal preprocessing bodies or mutable paths; safe version/hash identities are sufficient. Source provenance remains unchanged.
+Source provenance remains unchanged.
 
-## 9. Tests
+## 11. Tests
 
 Phase 3 must include tests proving:
 
-1. identical validated request + identical preprocessing identity produces byte-identical embedding-provider query input;
-2. evaluation and production use the same preprocessing function/configuration;
-3. changing preprocessing configuration changes the frozen candidate identity even when all document embeddings are unchanged;
-4. changed preprocessing invalidates prior held-out release-gate authorization;
-5. changed preprocessing invalidates the optional query-embedding cache where applicable;
-6. runtime startup/capability validation rejects an unsupported or mismatched release-bound preprocessing version;
-7. negation, numbers/units, exact identifiers, and edition anchors survive every admitted preprocessing rule according to the design contract;
-8. the release manifest/build identity records the exact preprocessing version/hash;
-9. retrieval lineage/provenance records the safe preprocessing identity for dense/hybrid selections;
-10. rollback restores the earlier query-preprocessing identity together with the earlier model/vector/RRF/release configuration.
+1. the generic preprocessing framework deterministically constructs candidate projections;
+2. each candidate projection is frozen before the candidate's first benchmark query;
+3. identical request + identical candidate projection produces byte-identical provider query input;
+4. candidates with different required prefixes/templates/role markers receive distinct frozen identities;
+5. model-selection reports bind the exact candidate-specific projection used;
+6. the winning projection is reused byte-for-byte/identity-for-identity in RRF selection and runtime;
+7. changing the winning projection after model selection invalidates model-selection evidence;
+8. changing it after RRF selection invalidates both model- and RRF-selection evidence;
+9. changed preprocessing invalidates prior held-out authorization and optional query-embedding caches;
+10. runtime validation rejects unsupported or mismatched release-bound preprocessing identities;
+11. negation, numbers/units, exact identifiers, and edition anchors survive every admitted candidate projection;
+12. release/build identity records the exact winning projection version/hash;
+13. rollback restores the earlier winning preprocessing identity together with the earlier model/vector/RRF/release configuration.
 
-## 10. Acceptance criteria
+## 12. Acceptance criteria
 
 Phase 3 is not complete unless:
 
-1. query preprocessing has one deterministic versioned contract;
-2. its schema/rule/configuration identity is part of the complete frozen Phase 3 candidate identity;
-3. its identity is bound into the release/build identity;
-4. model-selection and held-out gate reports record it;
-5. a preprocessing change cannot reuse prior held-out authorization;
-6. cache and invalidation tests cover it;
-7. runtime capability validation requires the release-bound preprocessing contract;
-8. retrieval provenance identifies it safely without changing source authority.
+1. one deterministic versioned generic preprocessing framework exists before model benchmarking;
+2. every embedding candidate freezes its complete model-specific preprocessing projection before benchmarking;
+3. model selection chooses the complete model+preprocessing pair;
+4. the winning pair's projection is carried unchanged into RRF selection, final confirmation, release identity, and production;
+5. candidate and winning projection identities participate in the appropriate selection/release/evaluation records;
+6. a behavior-bearing projection change cannot reuse stale model/RRF/held-out authorization;
+7. cache and invalidation tests cover candidate/winning preprocessing identity;
+8. runtime capability validation requires the release-bound winning projection contract;
+9. retrieval provenance identifies the winning preprocessing safely without changing source authority or the closed Evidence Package schema.
