@@ -54,7 +54,14 @@ Validate applicable bounds before and after field-specific normalization.
 
 Phase 2 uses exact/identifier and lexical direct seeds, then always runs required graph-and-material-conflict closure. Filters constrain direct seeds, not required attachments.
 
-Success is exactly `{query, retrieval_mode, release, context_completeness, evidence, context_targets, conflicts, warnings}`. No match is a complete empty success. Invalid input, explicit unavailable mode, required closure overflow, and integrity failures use the exact design routes; required overflow never produces a partial package.
+Success is exactly `{query, retrieval_mode, release, context_completeness, evidence, context_targets, conflicts, warnings}`.
+
+Two success-warning rules are mandatory:
+
+1. if `auto` resolves to the available Phase 2 exact/lexical path because a later dense/reranker capability is unavailable, `warnings` includes the typed `retrieval_capability_unavailable` warning required by the design; this fallback is never silent;
+2. a valid no-match search is a `complete` success with empty evidence/context-target/conflict arrays **and includes `evidence_insufficient`**; `warnings: []` is invalid for the no-match condition.
+
+Invalid input, explicit unavailable mode, required closure overflow, and integrity failures use the exact design routes; required overflow never produces a partial package.
 
 ### `get_clause`
 
@@ -134,11 +141,13 @@ Required graph/conflict traversal receives no exemption.
 
 ## 17. Conformance tests
 
-Tool tests cover strict schemas, exact success/error shapes, legacy/structured equality, boundary/one-over inputs, no-match search, required graph/conflict closure, unsupported later modes, and no-partial required overflow.
+Tool tests cover strict schemas, exact success/error shapes, legacy/structured equality, boundary/one-over inputs, **no-match search with mandatory `evidence_insufficient`**, **`auto` fallback with mandatory `retrieval_capability_unavailable`**, required graph/conflict closure, unsupported later modes, and no-partial required overflow.
 
 Evidence tests cover exact clause, lexical context, material conflict all-side preservation, empty context target, unresolved-required warnings, source/status/edition preservation, and Python/CLI/MCP lineage equality.
 
 Resource tests cover canonical URI round trip/negatives, one-item cardinality, exact document/clause/page/release contracts, exact raw source MIME/bytes, resource-miss routing, integrity failure, and cancellation/admission/output-budget races.
+
+Negative tests explicitly reject a no-match success with `warnings: []` and an applicable `auto` capability fallback that omits `retrieval_capability_unavailable`.
 
 ## 18. Acceptance criteria
 
@@ -147,13 +156,15 @@ Phase 2 MCP wire/resource work is complete only when:
 1. all six current Phase 2 tools are advertised with complete current-design semantics;
 2. evidence tools use the shared context/conflict-complete service;
 3. explicit later unsupported capabilities fail visibly;
-4. dual-revision tool schemas/success/errors conform;
-5. legacy text equals structured success exactly;
-6. resource URIs are canonical/safe;
-7. document/clause/page/release resources obey exact Section 22 contracts;
-8. source resources return only exact raw validated `original_text` with exact `text/plain;charset=utf-8` MIME and no wrapper;
-9. older protocol/admission companion surface-scope statements are treated as superseded while their transport/admission rules remain authoritative;
-10. required evidence is never dropped for payload convenience;
-11. public allowlists prevent path/credential/internal leakage;
-12. transport/admission/cancellation/frame budgets apply to all current evidence operations;
-13. no Phase 3 dense/RRF or Phase 4 reranking/supporting-context behavior is pulled into Phase 2.
+4. every applicable successful `auto` capability fallback includes `retrieval_capability_unavailable`;
+5. every valid no-match search includes `evidence_insufficient` while remaining a complete empty success;
+6. dual-revision tool schemas/success/errors conform;
+7. legacy text equals structured success exactly;
+8. resource URIs are canonical/safe;
+9. document/clause/page/release resources obey exact Section 22 contracts;
+10. source resources return only exact raw validated `original_text` with exact `text/plain;charset=utf-8` MIME and no wrapper;
+11. older protocol/admission companion surface-scope statements are treated as superseded while their transport/admission rules remain authoritative;
+12. required evidence/warnings are never dropped for payload convenience;
+13. public allowlists prevent path/credential/internal leakage;
+14. transport/admission/cancellation/frame budgets apply to all current evidence operations;
+15. no Phase 3 dense/RRF or Phase 4 reranking/supporting-context behavior is pulled into Phase 2.
