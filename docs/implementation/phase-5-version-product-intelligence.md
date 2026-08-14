@@ -117,7 +117,7 @@ Each mapping retains:
 - immutable review artifact identity for human-reviewed semantic decisions;
 - mapping-schema version.
 
-The initial mapping kinds should remain a closed internal enum such as exact continuation, renumbered continuation, split, merged, replaced, removed, added, and unresolved. Any public exposure of these values requires the public-schema prerequisite in Section 3.
+The initial mapping kinds should remain a closed internal enum such as exact continuation, renumbered continuation, reworded continuation, split, merged, replaced, removed, added, and unresolved. Any public exposure of these values requires the public-schema prerequisite in Section 3.
 
 ## 8. Mapping authority
 
