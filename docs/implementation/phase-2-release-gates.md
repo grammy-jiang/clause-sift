@@ -3,272 +3,407 @@
 **Project:** ClauseSift  
 **Phase:** 2 — Exact Retrieval MVP  
 **Status:** Normative Phase 2 implementation-plan appendix  
-**Primary design authority:** `docs/design.md`  
+**Primary design authority:** `docs/design.md` Section 29.4  
 **Companion plan:** `docs/implementation/phase-2-exact-retrieval-mvp.md`
 
-## 1. Purpose and scope
+## 1. Purpose
 
-This appendix defines the Phase 2 evaluation-data separation, probabilistic release gates, and activation/failure tests that apply to the Exact Retrieval MVP.
+This appendix maps the current design's initial quality gates to the capabilities implemented by Phase 2.
 
-It is intentionally limited to capabilities implemented in Phase 2:
+Phase 2 owns exact/lexical seed retrieval, the canonical evidence vocabulary/classifications, required context, material-conflict compilation/runtime preservation, deterministic citations, strict ordinary Evidence Packages, and the basic Python/CLI/MCP evidence surfaces. All current-design gates for those capabilities are therefore Phase 2 blocking gates.
 
-- lexical retrieval;
-- canonical `node_type` classification;
-- canonical `normative_status` classification;
-- canonical `source_modality` classification;
-- the deterministic Phase 2 conformance suites already defined by the companion plan.
+Phase 2 does not own Phase 3 dense/RRF gates or Phase 4 reranker/supporting-context/high-accuracy gates. In particular, `optional-context precision` remains a later high-accuracy/supporting-context gate rather than a Phase 2 ordinary required-context gate.
 
-It does **not** add Phase 3 embedding/vector/fusion gates or Phase 4 reranking, runtime Evidence Graph traversal, optional-context, conflict-runtime, or refusal gates.
+No implementation-plan document may replace the design's exact gate type or threshold with a locally invented stronger/weaker metric.
 
-Where the companion Phase 2 plan can be read as allowing lexical engine/tokenizer selection to use the held-out release-gate sample, or as omitting the three probabilistic classification gates, this appendix is authoritative and narrows/corrects that interpretation. In particular, it supersedes the sequencing implications of the companion plan's lexical-selection, Phase 2 evaluation, quality-gate, failure-injection, acceptance-criteria, and recommended-sequence sections only to the extent necessary to implement the rules below.
+## 2. Evaluation-data separation
 
-## 2. Evaluation split separation is mandatory
+Phase 2 uses the Phase 0 versioned evaluation corpus and keeps development/model-selection evidence separate from decisive release-gate evidence.
 
-Phase 2 consumes the Phase 0 versioned split manifests and keeps the following roles distinct:
+Before a decisive probabilistic gate run, freeze every behavior-bearing input relevant to that gate and record:
 
-- **development diagnostics** — may be inspected repeatedly while implementing lexical query handling, deterministic classification rules, normalization, and other Phase 2 behavior;
-- **benchmark/model-selection split** — may be used to compare lexical engines, tokenizers, field weights, and other candidate configurations;
-- **held-out release-gate split** — must remain outside engine/tokenizer/configuration/classification-rule tuning and is evaluated only after the applicable candidate behavior is frozen;
-- **calibration split** — remains governed by the Phase 0 human-review methodology and is not a product-metric tuning set.
+- candidate identity/hash;
+- corpus/split/label versions;
+- reviewer/adjudication evidence where required;
+- applicable sample/stratum counts;
+- exact metric/gate target.
 
-An item cannot be silently moved from the held-out release-gate split into development or benchmark data after its output is observed. Any Phase 0-permitted label or split correction requires the Phase 0 change-control procedure and an auditable version change where meaning changes.
+Observed decisive data cannot be reused as fresh authorization for a behavior-bearing changed candidate; `phase-2-held-out-retry-policy.md` defines retirement/reproduction rules.
 
-The implementation must validate split membership before every benchmark or release-gate run. A benchmark-selection command must refuse to consume held-out release-gate labels. A release-gate command must identify the exact held-out split version it evaluated.
+Deterministic zero-failure gates use the complete versioned deterministic conformance suite named by the design. They are count gates over that complete suite, not claims that a finite confidence interval proves population perfection.
 
-## 3. Lexical selection and lexical release gating are separate operations
+## 3. Exact clause lookup gate
 
-### 3.1 Candidate selection
+Blocking design gate:
 
-Lexical engine/tokenizer/configuration selection uses only development diagnostics and the dedicated benchmark/model-selection split.
+> **Exact clause lookup success: zero failures across the complete versioned deterministic lookup suite.**
 
-Candidate comparison may use:
+The suite must cover at minimum:
 
-- Recall@5/10/20;
-- MRR;
-- nDCG;
-- exact-token preservation;
-- document/edition/clause/page hit diagnostics;
-- table-evidence hit diagnostics;
-- English, Chinese, and cross-language strata;
-- punctuation, identifier, number, and unit behavior;
-- index size/build time/load time/query latency;
-- packaging and reproducibility observations.
+- exact `document_id` and clause resolution;
+- complete Section 14.1 exact-lookup source set;
+- no fuzzy clause substitution;
+- no cross-edition/same-number substitution;
+- deterministic source/chunk ordering;
+- absent document/clause not-found routing.
 
-Accuracy remains the first decision criterion. Packaging or speed cannot justify a known material quality regression.
+Report complete suite size and every failure.
 
-After selection, freeze and record at minimum:
+## 4. Retrieval gates
 
-- lexical engine identity and version;
-- tokenizer identity and version;
-- field weights;
-- normalization/query-compiler configuration;
-- index schema/version;
-- benchmark split version;
-- source/corpus versions used for selection;
-- the selected configuration hash.
+After lexical candidate selection is complete and frozen, run the current probabilistic evidence-presence gates on independently labelled applicable cases.
 
-No held-out release-gate result may be used to choose between candidates or tune the frozen candidate.
+### 4.1 Recall@20
 
-### 3.2 Held-out lexical release gates
+- one-sided 95% Wilson lower confidence bound **>= 98%**;
+- at least **150** applicable independently labelled cases;
+- larger stratified samples when a critical query family/hard negative would otherwise be underrepresented.
 
-Only after the lexical candidate is frozen does Phase 2 evaluate the untouched held-out release-gate split.
+### 4.2 Top-5
 
-The following design gates are blocking:
+- one-sided 95% Wilson lower confidence bound **>= 95%**;
+- at least **60** applicable independently labelled cases;
+- larger stratified samples as required by the design.
 
-- expected evidence present in **Recall@20**: one-sided 95% Wilson lower confidence bound **at least 98%**;
-- expected evidence present in **Top 5**: one-sided 95% Wilson lower confidence bound **at least 95%**.
+For every result report numerator, denominator, point estimate, one-sided lower bound, target, split/corpus/label versions, exclusions, and frozen lexical configuration identity.
 
-Phase 0 sample-size requirements apply independently:
+A lower bound below target blocks activation and does not authorize tuning against the observed decisive split.
 
-- at least **150 applicable independently labelled cases** for the 98% Recall@20 gate;
-- at least **60 applicable independently labelled cases** for the 95% Top-5 gate;
-- larger samples when required strata would otherwise be underrepresented.
+## 5. Citation and version-selection gate
 
-The report for each gate contains:
+Blocking design gate:
 
-- successes;
-- failures;
-- total applicable cases;
-- point estimate;
-- one-sided 95% Wilson lower bound;
-- target;
-- pass/fail;
-- corpus/question/label/split versions;
-- excluded/not-applicable count and reasons;
-- selected lexical configuration hash.
+> **Document, edition, clause, and page citation accuracy: zero failures across the complete versioned deterministic citation suite.**
 
-A held-out failure blocks Phase 2 activation. It does **not** authorize iterative tuning against that held-out sample. Remediation must return to development/benchmark evidence, produce a newly frozen candidate, and follow the Phase 0 leakage/change-control policy before another release-gate evaluation.
+The suite validates executable equality against the active catalog/source lineage, including:
 
-## 4. Classification selection and release gating are separate operations
+- exact document/edition/source identity;
+- clause projection;
+- page start/end;
+- source-span/page-span intersections;
+- available bounding-box projection;
+- deterministic citation string;
+- no source/page fabrication when boxes are incomplete.
 
-Phase 2 constructs and admits all three canonical classification fields:
+Wrong-edition or wrong-source citation is always blocking.
 
-- `node_type`;
-- `normative_status`;
-- `source_modality`.
+## 6. Unsupported deterministic conclusions gate
 
-Therefore all three design classification-accuracy gates apply in Phase 2.
+Blocking design gate:
 
-### 4.1 Rule development and freezing
+> **Unsupported deterministic conclusions in the golden set: zero observed failures.**
 
-Deterministic source-format rules, inheritance rules, manifest/source-marker handling, and reviewed classification decisions are developed and validated against development/benchmark material, not the held-out release-gate sample.
+Phase 2 evidence/adapter behavior must not turn retrieval rank, document authority, recency, source modality, conflict score, or attachment into a deterministic engineering/legal conclusion unsupported by the source/approved metadata/rules.
 
-Before held-out evaluation, freeze and record:
+This gate complements, rather than replaces, the vocabulary/conflict/precedence negative suites below.
 
-- evidence-vocabulary version and hash;
-- classification schema version;
-- deterministic classification rule-set version/configuration hash;
-- inheritance-rule version/configuration hash;
-- ordered immutable human-review artefact hashes where applicable;
-- held-out classification split version.
+## 7. Required-context traversal conformance gate
 
-Retrieval rank, document recency, or model output cannot alter the frozen classifications.
+Blocking design gate:
 
-### 4.2 Three independent probabilistic blocking gates
+> **Required context, lineage paths, source status, and deterministic ordering: zero failures across the complete versioned traversal conformance suite.**
 
-Evaluate each field independently on its applicable, independently labelled held-out classification corpus:
+The complete suite must exercise the current Phase 2 required rules and runtime contract, including:
 
-1. **node-type accuracy** — one-sided 95% Wilson lower confidence bound **at least 98%**;
-2. **normative-status accuracy** — one-sided 95% Wilson lower confidence bound **at least 98%**;
-3. **source-modality accuracy** — one-sided 95% Wilson lower confidence bound **at least 98%**.
+- `applies_subject_to` forward;
+- `depends_on` forward;
+- reverse/forward `exception_to`;
+- `defines` governing scope;
+- table row -> containing table/nearest addressable clause;
+- note/footnote -> qualifying parent;
+- exact metadata-only empty `context_targets`;
+- reconvergent independent paths;
+- path-state ordering/deduplication;
+- source/edition/status preservation;
+- graph/conflict fixed-point composition;
+- exact current structural/semantic/object/path/step bounds;
+- `context_limit_exceeded` with no partial required Evidence Package.
 
-Each gate requires at least **150 applicable independently labelled cases**, with larger stratified samples when a classification field, origin, inheritance branch, document/node family, language, ambiguity class, or critical hard negative would otherwise be underrepresented.
+Report the complete suite size and every failure.
 
-Counts may not be pooled across the three fields to satisfy the minimum. Each field receives its own numerator, denominator, point estimate, Wilson lower bound, target, and pass/fail result.
+## 8. Traversal negative gate
 
-The three probabilistic gates are in addition to, not replacements for, deterministic conformance requirements such as:
+Blocking design gate:
 
-- exact vocabulary/schema conformance;
-- classification-provenance/inheritance fidelity;
-- legacy-alias rejection;
-- unsupported-version rejection;
-- deterministic recomputation equality;
-- zero promotion of `unclassified`/`unknown` to an unsupported stronger value;
-- no inference of project-specific legal force from source modality.
+> **Prohibited, unresolved, guessed, or wrong-edition traversal: zero accepted edges across the complete versioned negative suite.**
 
-Any one of the three Wilson lower bounds below 98% blocks Phase 2 activation.
+Fixtures include:
 
-## 5. Phase 2 quality gate
+- unresolved occurrence followed by guessed clause/document text;
+- ambiguous target followed anyway;
+- wrong endpoint category;
+- source-text `supersedes`/`amends` without manifest authority;
+- invalid cycle admitted as navigable;
+- wrong-edition same clause label;
+- similarity-based graph target invention;
+- unclassified node used as a typed endpoint it cannot satisfy.
 
-An Exact Retrieval MVP candidate may be activated only when **all** applicable Phase 2 gates pass, including:
+Every accepted prohibited edge blocks release.
 
-- manifest/source/parser/canonical/page/chunk/catalog/integrity gates from the companion plan;
-- deterministic exact-clause and citation suites;
-- deterministic evidence-vocabulary/classification/provenance suites;
-- held-out lexical Recall@20 Wilson lower bound >= 98%;
-- held-out lexical Top-5 Wilson lower bound >= 95%;
-- held-out `node_type` Wilson lower bound >= 98%;
-- held-out `normative_status` Wilson lower bound >= 98%;
-- held-out `source_modality` Wilson lower bound >= 98%;
-- durable static/evaluation reports;
-- candidate checksum/read-only smoke validation;
+## 9. Vocabulary/schema deterministic gate
+
+Blocking design gate:
+
+> **Core vocabulary/schema, document-dimension separation, classification provenance/inheritance, public round trip, legacy-alias rejection, unsupported-version rejection, and extension-isolation conformance: zero failures across the complete deterministic vocabulary suite.**
+
+This gate remains distinct from probabilistic semantic classification accuracy.
+
+## 10. Classification probabilistic gates
+
+Evaluate each field independently on its applicable independently labelled classification corpus:
+
+1. `node_type` accuracy — one-sided 95% Wilson lower bound **>= 98%**;
+2. `normative_status` accuracy — one-sided 95% Wilson lower bound **>= 98%**;
+3. `source_modality` accuracy — one-sided 95% Wilson lower bound **>= 98%**.
+
+Each 98% gate requires at least **150** applicable independently labelled cases, expanded when a classification field/origin/inheritance branch/document/node family/language/ambiguity/hard negative would otherwise be underrepresented.
+
+Counts cannot be pooled across fields.
+
+## 11. Classification/source-authority negative gate
+
+Blocking design gate:
+
+> **Zero occurrences** across the complete negative suite of:
+>
+> - `unclassified`/`unknown` promoted to a stronger classification;
+> - informative material promoted by attachment/ranking;
+> - source modality reported as project-specific legal force.
+
+This applies through the final Evidence Package/adapters, not only catalog construction.
+
+## 12. Conflict-candidate recall gate
+
+Phase 2 owns build-time conflict candidate generation under current design, so the design's conflict-candidate recall gate is Phase 2 blocking.
+
+- one-sided 95% Wilson lower confidence bound **>= 95%**;
+- at least **60** applicable independently labelled cases;
+- larger stratified samples when conflict dimension/detector/hard-negative coverage would otherwise be inadequate.
+
+A model-only future detector is not needed to satisfy Phase 2; evaluate the admitted current deterministic/human-input candidate mechanisms.
+
+## 13. Conflict precision gates
+
+Evaluate the applicable conflict families separately.
+
+### 13.1 Confirmed/unresolved conflict precision
+
+For each reported state family covered by the release corpus:
+
+- one-sided 95% Wilson lower confidence bound **>= 98%**;
+- at least **150** applicable independently labelled cases per 98% gate, expanded for critical strata.
+
+### 13.2 Explained-difference precision
+
+For each reported explanation-code family covered by the release corpus:
+
+- one-sided 95% Wilson lower confidence bound **>= 98%**;
+- at least **150** applicable independently labelled cases per 98% gate, expanded as necessary.
+
+Always report numerator, denominator, point estimate, lower bound, target, state/code family, split/corpus/reviewer identity, and frozen conflict rule/configuration identity.
+
+## 14. Deterministic conflict completeness and precedence gate
+
+Blocking design gate:
+
+> **Conflict position/source/lineage completeness, all-side runtime preservation, state/dimension ordering, and trusted-precedence serialization: zero failures across the complete deterministic conflict conformance suite.**
+
+The complete suite includes:
+
+- content-addressed conflict/position IDs;
+- exact spans/source ownership;
+- required-context projection;
+- deterministic decision artifact binding;
+- canonical per-position source cover;
+- n-ary conflict ordering;
+- runtime span-intersection discovery;
+- every material side present regardless of seed rank/filter;
+- required context of newly attached sides;
+- graph/conflict least fixed point;
+- exact `conflicts` array and assembly reasons;
+- encoded precedence only through an approved rule;
+- all current conflict limits and no-partial overflow behavior.
+
+Report complete suite size and every failure.
+
+## 15. Conflict negative gate
+
+Blocking design gate:
+
+> **Zero occurrences** across the complete negative suite of:
+>
+> - explained exception/version/jurisdiction/scope/unit/modality cases misreported as confirmed conflict;
+> - unresolved or model-only candidates promoted without admissible review;
+> - winner selection without encoded precedence.
+
+Also reject any `potential` conflict in an admitted runtime release.
+
+## 16. Evidence Package and interface conformance
+
+Phase 2's ordinary evidence path must pass deterministic conformance for:
+
+- strict root/item/lineage/context-target/conflict/warning schemas;
+- `additionalProperties: false` behavior;
+- exact source/catalog projections;
+- immutable source/build lineage plus request-scoped assembly lineage;
+- no fabricated empty-node source evidence;
+- context/conflict completeness states/errors;
+- Python/CLI/MCP semantic equivalence;
+- canonical resource contracts;
+- public-field redaction/path safety.
+
+A mismatch that changes or drops required evidence semantics is blocking.
+
+The source resource remains a separate raw-source contract; it is not an Evidence Package wrapper.
+
+## 17. MCP/protocol/admission/cancellation conformance
+
+Existing Phase 2 MCP appendices remain blocking for the now-expanded evidence tools, including:
+
+- both supported protocol revisions;
+- strict input/output schemas;
+- 1,048,576-byte inbound complete-frame limit;
+- 65,536-byte canonical arguments budget;
+- 1,048,576-byte non-page output limit;
+- 33,554,432-byte page output limit;
+- 67,108,864-byte page working-set budget;
+- `max_in_flight_requests` 1..1024;
+- cancellation/deadline atomic terminal state;
+- late-result suppression;
+- resource URI canonicality;
+- safe diagnostic routing/redaction.
+
+Traversal/conflict work gets no exemption from these bounds.
+
+## 18. Phase 2 complete quality gate
+
+A candidate release may activate only when every applicable Phase 2 gate passes:
+
+- manifest/source/approval integrity;
+- parser/comparison/OCR release policy;
+- canonical/page/chunk/catalog integrity;
+- exact lookup zero-failure suite;
+- Recall@20 Wilson LB >= 98%;
+- Top-5 Wilson LB >= 95%;
+- citation/version-selection zero-failure suite;
+- unsupported deterministic conclusion zero-failure gate;
+- required-context/path/status/order zero-failure suite;
+- prohibited/guessed traversal zero-accepted-edge suite;
+- vocabulary/schema deterministic zero-failure suite;
+- three 98% classification Wilson gates;
+- classification/source-authority negative zero-occurrence suite;
+- conflict-candidate recall Wilson LB >= 95%;
+- confirmed/unresolved conflict precision Wilson LB >= 98% for each applicable family;
+- explained-difference precision Wilson LB >= 98% for each applicable code family;
+- deterministic conflict completeness/all-side/precedence zero-failure suite;
+- conflict negative zero-occurrence suite;
+- strict Evidence Package/interface conformance;
+- lineage/release/cache identity;
+- MCP/protocol/admission/cancellation/security conformance;
+- candidate checksum/read-only startup smoke validation;
+- activation and rollback validation;
 - no unresolved Phase 2 release blocker.
 
-A missing applicable sample, insufficient sample size, leakage violation, evaluation-execution failure, or missing gate report is blocking; it is never interpreted as a pass.
+A missing applicable gate, insufficient applicable sample size, leakage violation, evaluation execution failure, or missing/corrupt gate report is blocking and is never interpreted as a pass.
 
-Phase 3/4-only metrics remain explicitly `not_implemented_in_phase_2` and cannot be used either to pass or fail this milestone.
+## 19. Statistical reporting rules
 
-## 6. Required reports
+For all probabilistic retrieval/classification/conflict gates:
 
-The Phase 2 evaluation artefact and static review report must distinguish:
+- use independent labelled cases and one-sided 95% Wilson intervals;
+- require at least 150 applicable cases for each 98% gate;
+- require at least 60 applicable cases for each 95% gate;
+- increase samples when a critical query/classification/context-rule/conflict dimension/state/hard negative would otherwise be underrepresented;
+- never report a percentage without numerator and denominator;
+- fail when the lower bound misses target.
 
-- lexical candidate-selection results on the benchmark split;
-- the frozen lexical configuration identity;
-- held-out lexical release-gate results;
-- classification development/conformance results;
-- the frozen classification-rule identities;
-- held-out classification release-gate results for each of the three fields;
-- leakage/split-integrity validation;
-- sample counts and underrepresented strata;
-- deterministic conformance failures separately from probabilistic estimates.
+The deterministic 100%/zero-failure gates report complete suite size and every failure rather than a confidence interval.
 
-No report may present benchmark-selection performance as held-out release evidence.
+## 20. Human-review reliability
 
-## 7. Tests required by this appendix
+Where a Phase 2 metric depends on semantic human labels, preserve the design's blinded-review/adjudication policy:
 
-### 7.1 Split-integrity tests
+- initial release-gate items receive two blinded independent reviewers;
+- later releases use the design's preregistered stratified second-review coverage plus every failure/uncertain case;
+- calibration set is versioned, blinded, excluded from product metrics, and covers every rubric category as required;
+- agreement/kappa/fallback rules follow Section 29.3 exactly;
+- failed reliability blocks the affected semantic gate;
+- an LLM may assist analysis but cannot be the sole gate authority.
 
-Test that:
+## 21. Retry/retirement governance
 
-- lexical selection rejects held-out release-gate items;
-- classification-rule tuning rejects held-out release-gate items;
-- release-gate evaluation records the exact held-out split version;
-- overlap forbidden by Phase 0 split policy is detected;
-- a post-observation split/label mutation without required version/change-control evidence is rejected.
+`phase-2-held-out-retry-policy.md` governs decisive probabilistic evidence for retrieval/classification/conflict candidate/precision families.
 
-### 7.2 Wilson boundary tests
+Once a decisive split's labels/results are observed:
 
-For each of the five probabilistic Phase 2 gates, test:
+- identical-candidate replay is reproduction-only;
+- a behavior-bearing changed candidate cannot claim fresh authorization from that observed split;
+- remediation returns to development/model-selection/review data;
+- later decisive authorization requires fresh preregistered evidence under Phase 0 governance;
+- reserve/campaign use is finite and cannot become stop-on-pass cherry-picking.
 
-- exact pass boundary;
-- first failing result below the required lower bound;
-- minimum applicable sample count;
-- one-under minimum sample count;
-- excluded/not-applicable accounting;
-- stratification-driven sample expansion;
-- numerator/denominator reporting.
+Deterministic conformance suites are versioned executable suites rather than hidden probabilistic held-out samples; changes to their expected contract must be reviewed/versioned rather than silently edited to make a candidate pass.
 
-The five gates are:
+## 22. Failure injection
 
-1. lexical Recall@20 >= 98%;
-2. lexical Top 5 >= 95%;
-3. node-type accuracy >= 98%;
-4. normative-status accuracy >= 98%;
-5. source-modality accuracy >= 98%.
+Inject and verify correct non-activation/no-partial behavior for at least:
 
-### 7.3 Activation/failure injection
-
-Inject and prove blocking behavior for:
-
-- lexical Recall@20 held-out gate failure;
-- lexical Top-5 held-out gate failure;
-- node-type held-out gate failure;
-- normative-status held-out gate failure;
-- source-modality held-out gate failure;
-- insufficient sample size for any applicable gate;
-- held-out leakage into candidate selection/tuning;
-- evaluation execution failure;
+- each probabilistic lower-bound failure;
+- insufficient probabilistic sample size;
+- decisive-data leakage;
+- exact lookup/citation wrong edition;
+- required-context/path/order failure;
+- prohibited guessed traversal;
+- required closure overflow;
+- vocabulary/classification negative failure;
+- stale/invalid conflict decision;
+- incomplete position source cover;
+- unresolved critical conflict;
+- one-sided conflict result;
+- false precedence selection;
+- conflict precision/recall gate failure;
+- strict Evidence Package schema/projection mismatch;
+- Python/CLI/MCP semantic mismatch;
+- source-resource payload/MIME mismatch;
+- release/lineage/artifact corruption;
+- output/admission budget violation;
+- cancellation/deadline late success;
 - missing/corrupt gate report.
 
-For every failure:
+For every release-time failure the candidate is not activated and the previous active release remains unchanged.
 
-- the candidate release is not activated;
-- the previous active release remains unchanged;
-- diagnostics/report data remain available;
-- no gate is silently skipped or downgraded to advisory.
+## 23. Corrected execution order
 
-## 8. Corrected Phase 2 execution order
+The evaluation/release portion of Phase 2 is:
 
-The Phase 2 evaluation/release portion of the implementation sequence is:
+1. complete/freeze canonical catalog, graph, context, conflict, lineage, lexical, and serializer contracts;
+2. select/freeze lexical configuration on non-decisive data;
+3. freeze classification behavior;
+4. freeze conflict candidate/classifier/explanation behavior;
+5. run all complete deterministic exact/citation/traversal/vocabulary/conflict/evidence/MCP conformance suites;
+6. validate decisive split/reviewer/candidate identities;
+7. run retrieval Wilson gates;
+8. run three classification Wilson gates;
+9. run conflict candidate-recall and applicable conflict precision Wilson gates;
+10. persist raw results and complete deterministic-suite reports;
+11. enforce every blocker;
+12. finalize static decision/review report;
+13. assemble/checksum/reopen the immutable candidate release;
+14. run independent startup/read-only smoke validation;
+15. validate rollback;
+16. atomically activate only after every preceding step passes.
 
-1. complete and freeze the Phase 2 catalog and deterministic build artefacts;
-2. compare lexical candidates using development + benchmark/model-selection data only;
-3. choose and freeze one lexical engine/tokenizer/configuration;
-4. build the candidate lexical index from that frozen configuration;
-5. complete/freeze the Phase 2 deterministic classification rule/review inputs;
-6. run deterministic conformance/regression suites;
-7. run split-integrity validation;
-8. evaluate the frozen lexical candidate on the untouched held-out release split;
-9. evaluate the frozen classification behavior on the independently labelled held-out classification split for all three fields;
-10. persist the raw evaluation results and gate reports;
-11. enforce all Phase 2 blocking gates;
-12. finalize the Phase 2 static report;
-13. assemble/validate/reopen the immutable candidate release;
-14. run read-only smoke tests;
-15. activate only after every preceding gate succeeds.
+Decisive probabilistic evidence is a gate, not an optimizer.
 
-The held-out release sample is a gate, not an optimizer.
+## 24. Acceptance criteria
 
-## 9. Acceptance additions
+Phase 2 is not complete unless:
 
-In addition to the companion plan's Phase 2 acceptance criteria, Phase 2 is not complete unless:
-
-1. lexical candidate selection and held-out lexical release evaluation use distinct Phase 0 split roles;
-2. the frozen lexical candidate meets the 98% Recall@20 and 95% Top-5 one-sided Wilson lower-bound gates on untouched held-out data;
-3. `node_type`, `normative_status`, and `source_modality` each meet an independent 98% one-sided Wilson lower-bound gate on applicable independently labelled held-out data;
-4. every applicable 98% gate has at least 150 cases and every applicable 95% gate has at least 60 cases, increased when stratification requires it;
-5. split-integrity/leakage validation passes;
-6. all five probabilistic gate reports retain numerator, denominator, lower bound, target, versions, and exclusions;
-7. failure or insufficient evidence for any gate prevents activation without changing the previous active release.
-
-These requirements remain strictly Phase 2 because they gate only capabilities Phase 2 itself constructs and advertises.
+1. every current-design Phase 2 deterministic gate passes with zero failures/zero prohibited occurrences as specified;
+2. retrieval and classification Wilson gates meet the exact thresholds/sample rules;
+3. conflict-candidate recall and conflict precision Wilson gates meet the exact thresholds/sample rules;
+4. strict Evidence Package and interface conformance passes;
+5. protocol/admission/cancellation/security conformance passes;
+6. decisive probabilistic evidence is leakage-safe and retirement-governed;
+7. missing/failed evidence blocks activation while preserving the previous release;
+8. no Phase 3 dense/RRF or Phase 4 reranking/supporting-context quality gate is misclassified as Phase 2.
